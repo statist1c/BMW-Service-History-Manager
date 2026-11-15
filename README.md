@@ -91,7 +91,7 @@ The platform-only instrumentation runner is `dev.mgu.service.AppSmokeTest`; run 
 
 **PolyForm Noncommercial License 1.0.0**. This derived Android app is for personal and other permitted noncommercial purposes. The upstream license does not permit use in a paid service business, selling the app, or other anticipated commercial application. Obtain separate permission from the relevant rights holder for commercial use.
 
-Required Notice: Copyright 2026 devttys1 (https://github.com/devttys1/bmw-service-manager)
+See [LICENSE.md](LICENSE.md) and [NOTICE.md](NOTICE.md) for license terms and required attribution.
 
 Distribute [LICENSE.md](LICENSE.md) and [NOTICE.md](NOTICE.md) with the source and retain the in-app license screen. Build-tool notices are in `licenses/`. No upstream 3D models, web fonts or web/runtime libraries are included.
 

@@ -143,6 +143,54 @@ public class AppSmokeTest extends Instrumentation {
           "Choose newest version independent of release ordering");
       JSONObject draft = release("v0.6.0", false, "draft.apk", source, sha).put("draft", true);
       ok(Updater.choose(new JSONArray().put(draft), "0.2.1", source) == null, "Ignore draft");
+      JSONObject preview = release("v0.3.0", true, "BMW-Service-Manager-v0.3.0.apk", source, sha);
+      Updater.Release previewUpdate =
+          Updater.choose(new JSONArray().put(preview), "0.2.2", source, true);
+      ok(
+          previewUpdate != null && previewUpdate.preview,
+          "Include GitHub preview with normal version tag");
+      ok(
+          Updater.choose(new JSONArray().put(preview), "0.2.2", source, false) == null,
+          "Stable-only channel excludes previews");
+      ok(
+          Updater.choose(new JSONArray().put(draft), "0.2.1", source, true) == null,
+          "Preview channel still excludes drafts");
+      ok(
+          Updater.choose(new JSONArray().put(preview), "0.3.0", source, true) == null,
+          "Preview channel rejects same version");
+      ok(
+          Updater.choose(
+                  new JSONArray()
+                      .put(preview)
+                      .put(release("v0.3.1", false, "renamed.apk", source, sha)),
+                  "0.2.2",
+                  source,
+                  true)
+              .tag
+              .equals("v0.3.1"),
+          "Newest stable wins over older preview");
+      ok(new Updater.Release(previewUpdate.json()).preview, "Preview metadata survives caching");
+      if (args != null && "true".equals(args.getString("live"))) {
+        java.net.HttpURLConnection connection =
+            Updater.connect("https://api.github.com/repos/" + source + "/releases?per_page=100");
+        JSONArray published;
+        try {
+          published =
+              new JSONArray(
+                  new String(
+                      Updater.read(connection.getInputStream(), 2 * 1024 * 1024),
+                      java.nio.charset.StandardCharsets.UTF_8));
+        } finally {
+          connection.disconnect();
+        }
+        Updater.Release publishedUpdate = Updater.choose(published, "0.2.1", source, true);
+        ok(
+            publishedUpdate != null
+                && ReleaseVersion.parse(publishedUpdate.tag)
+                        .compareTo(ReleaseVersion.parse("0.2.2"))
+                    >= 0,
+            "Detect actual published GitHub release from v0.2.1");
+      }
       if (args != null && "updater".equals(args.getString("focus"))) {
         result.putString("stream", "PASS: " + checks + " updater/JSON checks\n");
         finish(Activity.RESULT_OK, result);
@@ -180,6 +228,7 @@ public class AppSmokeTest extends Instrumentation {
       click("Save");
       ui(() -> ok(app.records.size() == 1, "Save record through native dialog"));
       editorChecks();
+      if (args != null && "true".equals(args.getString("upgrade"))) updateFlowChecks();
       ui(
           () -> {
             app.reset.setChecked(false);
@@ -452,6 +501,39 @@ public class AppSmokeTest extends Instrumentation {
         "Save back truncates and writes exact TST");
     ok(ServiceRecord.parseTst(saved).records.size() == 1, "Saved TST imports successfully");
     ui(() -> app.prefs().edit().remove("opened_tst").apply());
+  }
+
+  void updateFlowChecks() throws Exception {
+    java.io.File next = new java.io.File(app.getFilesDir(), "update-flow.apk");
+    Updater.Release release =
+        new Updater.Release(metadata(next, "v0.3.1").json().put("preview", true));
+    Updater.validate(app, next, release);
+    ok(true, "Validate newer same-signer preview APK");
+    java.nio.file.Files.copy(
+        next.toPath(),
+        Updater.apk(app).toPath(),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    Updater.prefs(app)
+        .edit()
+        .putBoolean("previews", false)
+        .putString("release", release.json().toString())
+        .commit();
+    ok(Updater.cached(app) == null, "Stable-only channel ignores cached preview");
+    Updater.prefs(app).edit().putBoolean("previews", true).commit();
+    ok(Updater.cached(app) != null, "Preview channel restores eligible cached update");
+    ui(
+        () -> {
+          app.select(3);
+          app.reviewUpdate();
+        });
+    node("Update to v0.3.1?");
+    click("Continue");
+    node("Install verified update?");
+    click("Continue");
+    node("Do you want to update this app?");
+    ok(true, "In-app verified preview opens Android update installer without redownload");
+    click("Cancel");
+    Updater.prefs(app).edit().remove("release").apply();
   }
 
   void setDescriptionText(String desc, String value) throws Exception {

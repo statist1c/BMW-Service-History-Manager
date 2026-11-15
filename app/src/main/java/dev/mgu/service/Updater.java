@@ -32,6 +32,7 @@ final class Updater {
 
   static final class Release {
     final String tag, url, digest, notes;
+    final boolean preview;
     final long size;
 
     Release(JSONObject j) throws JSONException {
@@ -39,6 +40,7 @@ final class Updater {
       url = j.getString("url");
       digest = j.getString("digest");
       notes = j.optString("notes");
+      preview = j.optBoolean("preview", false);
       size = j.getLong("size");
     }
 
@@ -48,6 +50,7 @@ final class Updater {
           .put("url", url)
           .put("digest", digest)
           .put("notes", notes)
+          .put("preview", preview)
           .put("size", size);
     }
   }
@@ -129,11 +132,16 @@ final class Updater {
   }
 
   static Release choose(JSONArray releases, String installed, String repo) throws Exception {
+    return choose(releases, installed, repo, false);
+  }
+
+  static Release choose(JSONArray releases, String installed, String repo, boolean previews)
+      throws Exception {
     Release best = null;
     ReleaseVersion current = ReleaseVersion.parse(installed);
     for (int i = 0; i < releases.length(); i++) {
       JSONObject r = releases.getJSONObject(i);
-      if (r.optBoolean("draft") || r.optBoolean("prerelease")) continue;
+      if (r.optBoolean("draft") || (!previews && r.optBoolean("prerelease"))) continue;
       String tag = r.optString("tag_name");
       ReleaseVersion version;
       try {
@@ -182,7 +190,8 @@ final class Updater {
                     .put("url", url)
                     .put("digest", digest.substring(7).toLowerCase(Locale.ROOT))
                     .put("size", size)
-                    .put("notes", r.optString("body")));
+                    .put("notes", r.optString("body"))
+                    .put("preview", r.optBoolean("prerelease")));
         break;
       }
     }
@@ -191,6 +200,7 @@ final class Updater {
 
   static Release check(Context c) throws Exception {
     String source = repo(c);
+    boolean previews = prefs(c).getBoolean("previews", true);
     HttpURLConnection connection =
         connect("https://api.github.com/repos/" + source + "/releases?per_page=100");
     byte[] bytes;
@@ -203,8 +213,11 @@ final class Updater {
         choose(
             new JSONArray(new String(bytes, StandardCharsets.UTF_8)),
             BuildConfig.VERSION_NAME,
-            source);
+            source,
+            previews);
     if (!source.equals(repo(c))) throw new IOException("Repository changed; check again.");
+    if (previews != prefs(c).getBoolean("previews", true))
+      throw new IOException("Update channel changed; check again.");
     SharedPreferences.Editor editor =
         prefs(c)
             .edit()
@@ -225,6 +238,7 @@ final class Updater {
       String json = prefs(c).getString("release", "");
       if (json.isEmpty()) return null;
       Release r = new Release(new JSONObject(json));
+      if (r.preview && !prefs(c).getBoolean("previews", true)) return null;
       return ReleaseVersion.parse(r.tag).compareTo(ReleaseVersion.parse(BuildConfig.VERSION_NAME))
               > 0
           ? r

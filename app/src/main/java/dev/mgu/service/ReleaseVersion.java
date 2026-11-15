@@ -2,7 +2,7 @@ package dev.mgu.service;
 
 import java.util.regex.*;
 
-/** Stable three-component versions only; never installs prereleases or downgrades. */
+/** Three-component version tags; GitHub preview eligibility is controlled by the updater. */
 public final class ReleaseVersion implements Comparable<ReleaseVersion> {
   private final int major, minor, patch;
 
@@ -16,7 +16,7 @@ public final class ReleaseVersion implements Comparable<ReleaseVersion> {
     Matcher m =
         Pattern.compile("^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$").matcher(value);
     if (!m.matches())
-      throw new IllegalArgumentException("Expected a stable version such as v0.1.0.");
+      throw new IllegalArgumentException("Expected a version such as v0.3.0.");
     return new ReleaseVersion(
         Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3)));
   }

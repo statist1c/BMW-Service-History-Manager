@@ -1677,15 +1677,28 @@ public final class MainActivity extends Activity {
         });
     card(p, "GitHub app updates");
     label(
-        "Updates from statist1c/BMW-Service-History-Manager. Stable releases only. Automatic checks"
-            + " run approximately daily when Android allows; download and install require your"
-            + " action.");
+        "Updates from statist1c/BMW-Service-History-Manager. Preview releases are included by"
+            + " default. Automatic checks run approximately daily when Android allows; download and"
+            + " install require your action.");
     CheckBox automatic =
         check("Automatically check for updates", Updater.prefs(this).getBoolean("automatic", true));
     automatic.setOnCheckedChangeListener(
         (b, value) -> {
           Updater.prefs(this).edit().putBoolean("automatic", value).apply();
           Updater.schedule(this);
+        });
+    CheckBox previews =
+        check("Include preview releases", Updater.prefs(this).getBoolean("previews", true));
+    previews.setOnCheckedChangeListener(
+        (button, enabled) -> {
+          Updater.prefs(this)
+              .edit()
+              .putBoolean("previews", enabled)
+              .remove("release")
+              .putLong("last_check", 0)
+              .putString("status", "Update channel changed · check for updates")
+              .apply();
+          if (updates != null) updates.setText("Update channel changed · check for updates");
         });
     updates =
         label(
@@ -1767,7 +1780,8 @@ public final class MainActivity extends Activity {
             handler.post(
                 () -> {
                   updates.setText(Updater.prefs(this).getString("status", ""));
-                  if (manual && r == null) message("No newer compatible stable release found.");
+                  if (manual && r == null)
+                    message("No newer compatible release found for the selected update channel.");
                 });
           } catch (Exception e) {
             handler.post(
@@ -1786,13 +1800,14 @@ public final class MainActivity extends Activity {
     Updater.Release r = Updater.cached(this);
     if (r == null) {
       message(
-          "Check for updates first. Publish a newer stable GitHub release with"
+          "Check for updates first. Publish a newer GitHub release with"
               + " one APK attached to offer an update.");
       return;
     }
     confirm(
         "Update to " + r.tag + "?",
-        r.notes
+        (r.preview ? "Preview release\n\n" : "")
+            + r.notes
             + "\n\nDownload "
             + r.size
             + " bytes. SHA-256, app identity, newer version and signing certificate are checked"
@@ -1804,7 +1819,16 @@ public final class MainActivity extends Activity {
           worker.execute(
               () -> {
                 try {
-                  Updater.download(this, r);
+                  File cached = Updater.apk(this);
+                  boolean ready = false;
+                  if (cached.exists()) {
+                    try {
+                      Updater.validate(this, cached, r);
+                      ready = true;
+                    } catch (Exception ignored) {
+                    }
+                  }
+                  if (!ready) Updater.download(this, r);
                   handler.post(
                       () -> {
                         updates.setText(

@@ -145,15 +145,29 @@ final class Updater {
           || (best != null && version.compareTo(ReleaseVersion.parse(best.tag)) <= 0)) continue;
       JSONArray assets = r.optJSONArray("assets");
       if (assets == null) continue;
+      int apkCount = 0;
       for (int j = 0; j < assets.length(); j++) {
-        JSONObject a = assets.getJSONObject(j);
+        JSONObject asset = assets.optJSONObject(j);
+        if (asset != null && asset.optString("name").toLowerCase(Locale.ROOT).endsWith(".apk"))
+          apkCount++;
+      }
+      // A release must identify one installable APK without guessing between variants.
+      if (apkCount != 1) continue;
+      for (int j = 0; j < assets.length(); j++) {
+        JSONObject a = assets.optJSONObject(j);
+        if (a == null) continue;
         String url = a.optString("browser_download_url"), digest = a.optString("digest");
         long size = a.optLong("size");
-        if (!ASSET.equals(a.optString("name"))
+        if (!a.optString("name").toLowerCase(Locale.ROOT).endsWith(".apk")
             || !digest.matches("sha256:[0-9a-fA-F]{64}")
             || size <= 0
             || size > MAX) continue;
-        URI uri = new URI(url);
+        URI uri;
+        try {
+          uri = new URI(url);
+        } catch (URISyntaxException malformed) {
+          continue;
+        }
         String expected = "/" + repo + "/releases/download/";
         if (!"https".equals(uri.getScheme())
             || !"github.com".equals(uri.getHost())

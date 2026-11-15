@@ -1666,7 +1666,7 @@ public final class MainActivity extends Activity {
     if (r == null) {
       message(
           "Check for updates first. Publish a newer stable GitHub release with"
-              + " BMW-Service-Manager.apk to offer an update.");
+              + " one APK attached to offer an update.");
       return;
     }
     confirm(

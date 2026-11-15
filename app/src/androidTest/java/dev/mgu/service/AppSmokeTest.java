@@ -101,6 +101,30 @@ public class AppSmokeTest extends Instrumentation {
                   "statist1c/BMW-Service-History-Manager")
               == null,
           "Reject missing SHA256");
+      String source = "statist1c/BMW-Service-History-Manager";
+      String sha = "sha256:" + String.join("", Collections.nCopies(64, "a"));
+      for (String name : Arrays.asList("BMW-Service-Manager-v0.4.0.apk", "Any New Name.APK")) {
+        ok(Updater.choose(new JSONArray().put(release("v0.4.0", false, name, source, sha)),
+            "0.2.1", source) != null, "Accept arbitrary APK filename: " + name);
+      }
+      JSONObject multiple = release("v0.4.0", false, "one.apk", source, sha);
+      multiple.getJSONArray("assets").put(release("v0.4.0", false, "two.apk", source, sha)
+          .getJSONArray("assets").getJSONObject(0));
+      ok(Updater.choose(new JSONArray().put(multiple), "0.2.1", source) == null,
+          "Reject ambiguous multiple APKs");
+      ok(Updater.choose(new JSONArray().put(release("v0.4.0", false, "source.zip", source, sha)),
+          "0.2.1", source) == null, "Ignore non-APK assets");
+      JSONObject newest = release("v0.5.0", false, "renamed.apk", source, sha);
+      ok(Updater.choose(new JSONArray().put(newest).put(release("v0.4.0", false,
+          "older.apk", source, sha)), "0.2.1", source).tag.equals("v0.5.0"),
+          "Choose newest version independent of release ordering");
+      JSONObject draft = release("v0.6.0", false, "draft.apk", source, sha).put("draft", true);
+      ok(Updater.choose(new JSONArray().put(draft), "0.2.1", source) == null, "Ignore draft");
+      if (args != null && "updater".equals(args.getString("focus"))) {
+        result.putString("stream", "PASS: " + checks + " updater/JSON checks\n");
+        finish(Activity.RESULT_OK, result);
+        return;
+      }
       JSONObject invalid = HistoryJson.record(r).put("correction", 4294967296L);
       boolean rejected = false;
       try {
@@ -428,7 +452,7 @@ public class AppSmokeTest extends Instrumentation {
                                 + "/releases/download/"
                                 + tag
                                 + "/"
-                                + asset)));
+                                + java.net.URLEncoder.encode(asset, "UTF-8").replace("+", "%20"))));
   }
 
   static class CoreFixture {

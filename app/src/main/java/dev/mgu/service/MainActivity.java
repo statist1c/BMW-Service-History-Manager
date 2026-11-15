@@ -327,7 +327,13 @@ public final class MainActivity extends Activity {
         "Add service record",
         true,
         () -> {
-          if (available()) editRecord(-1);
+          if (available())
+            new AlertDialog.Builder(this)
+                .setTitle("Insert service record")
+                .setItems(
+                    new String[] {"At the top", "At the bottom"},
+                    (d, position) -> editRecord(-1, position == 0))
+                .show();
         });
     button(
         "Add from EDIABAS arguments…",
@@ -356,12 +362,17 @@ public final class MainActivity extends Activity {
             Intent i =
                 new Intent(Intent.ACTION_OPEN_DOCUMENT)
                     .setType("*/*")
+                    .addFlags(
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                     .addCategory(Intent.CATEGORY_OPENABLE);
             startActivityForResult(i, 10);
           }
         });
     button("Export JSON", false, () -> export(false));
     button("Export Toolset32 .tst", false, () -> export(true));
+    button("Save back to opened TST…", false, this::saveOpenedTst);
     historyList = new LinearLayout(this);
     historyList.setOrientation(LinearLayout.VERTICAL);
     p.addView(historyList);
@@ -703,6 +714,10 @@ public final class MainActivity extends Activity {
   }
 
   void editRecord(int index) {
+    editRecord(index, false);
+  }
+
+  void editRecord(int index, boolean atTop) {
     if (index < 0 && records.size() >= 2000) {
       message("Maximum 2000 records");
       return;
@@ -736,6 +751,7 @@ public final class MainActivity extends Activity {
             r.status - 1);
     EditText corr = input("Correction counter · 0–255", Integer.toString(r.correction), true);
     label("Service items · 1–13 per record");
+    CheckBox insertTop = check("Insert new items at the top", false);
     LinearLayout itemList = new LinearLayout(this);
     itemList.setOrientation(LinearLayout.VERTICAL);
     body.addView(itemList);
@@ -758,9 +774,11 @@ public final class MainActivity extends Activity {
                   options,
                   (d, w) -> {
                     if (w < ServiceRecord.CODES.length) {
-                      draft.items.add(new ServiceRecord.Item(ServiceRecord.CODES[w]));
+                      draft.items.add(
+                          insertTop.isChecked() ? 0 : draft.items.size(),
+                          new ServiceRecord.Item(ServiceRecord.CODES[w]));
                       render.run();
-                    } else customItem(draft, render);
+                    } else customItem(draft, render, insertTop.isChecked());
                   })
               .show();
         });
@@ -786,7 +804,7 @@ public final class MainActivity extends Activity {
                         draft.status = state.getSelectedItemPosition() + 1;
                         draft.correction = Integer.parseInt(val(corr));
                         draft.validate();
-                        if (index < 0) records.add(draft);
+                        if (index < 0) records.add(atTop ? 0 : records.size(), draft);
                         else records.set(index, draft);
                         changed();
                         dialog.dismiss();
@@ -797,7 +815,7 @@ public final class MainActivity extends Activity {
     dialog.show();
   }
 
-  void customItem(ServiceRecord r, Runnable after) {
+  void customItem(ServiceRecord r, Runnable after, boolean atTop) {
     EditText e = new EditText(this);
     e.setInputType(InputType.TYPE_CLASS_NUMBER);
     e.setHint("0–255");
@@ -816,7 +834,7 @@ public final class MainActivity extends Activity {
                       try {
                         int c = Integer.parseInt(val(e));
                         ServiceRecord.range(c, 255, "Item code");
-                        r.items.add(new ServiceRecord.Item(c));
+                        r.items.add(atTop ? 0 : r.items.size(), new ServiceRecord.Item(c));
                         after.run();
                         d.dismiss();
                       } catch (Exception ex) {
@@ -851,6 +869,23 @@ public final class MainActivity extends Activity {
             r.items.remove(i);
             renderDraftItems(list, r);
           });
+      int position = r.items.indexOf(i);
+      if (position > 0)
+        button(
+            "Move item up",
+            false,
+            () -> {
+              Collections.swap(r.items, r.items.indexOf(i), r.items.indexOf(i) - 1);
+              renderDraftItems(list, r);
+            });
+      if (position < r.items.size() - 1)
+        button(
+            "Move item down",
+            false,
+            () -> {
+              Collections.swap(r.items, r.items.indexOf(i), r.items.indexOf(i) + 1);
+              renderDraftItems(list, r);
+            });
     }
     body = old;
   }
@@ -860,6 +895,14 @@ public final class MainActivity extends Activity {
     body = new LinearLayout(this);
     body.setOrientation(LinearLayout.VERTICAL);
     body.setPadding(dp(20), 0, dp(20), dp(12));
+    int selectedType = -1;
+    for (int n = 0; n < ServiceRecord.CODES.length; n++)
+      if (ServiceRecord.CODES[n] == item.code) selectedType = n;
+    String[] types = Arrays.copyOf(ServiceRecord.NAMES, ServiceRecord.NAMES.length + 1);
+    types[types.length - 1] = "Custom code (use field below)";
+    Spinner type =
+        spinner("Service type", types, selectedType < 0 ? types.length - 1 : selectedType);
+    EditText customCode = input("Custom item code · 0–255", Integer.toString(item.code), true);
     Spinner st =
         spinner(
             "Item status",
@@ -884,8 +927,14 @@ public final class MainActivity extends Activity {
                       try {
                         long km = Long.parseLong(val(dist));
                         int mo = Integer.parseInt(val(months));
+                        int code =
+                            type.getSelectedItemPosition() < ServiceRecord.CODES.length
+                                ? ServiceRecord.CODES[type.getSelectedItemPosition()]
+                                : Integer.parseInt(val(customCode));
+                        ServiceRecord.range(code, 255, "Item code");
                         ServiceRecord.range(km, 0xffffffffL, "Distance");
                         ServiceRecord.range(mo, 65535, "Months");
+                        item.code = code;
                         item.status = st.getSelectedItemPosition() + 1;
                         item.distance = km;
                         item.months = mo;
@@ -907,6 +956,61 @@ public final class MainActivity extends Activity {
           tst ? "text/plain" : "application/json");
     } catch (Exception e) {
       message(e.getMessage());
+    }
+  }
+
+  void saveOpenedTst() {
+    if (!available()) return;
+    String address = prefs().getString("opened_tst", "");
+    if (address.isEmpty()) {
+      message("Import a TST file first, or use Export Toolset32 .tst to save a new file.");
+      return;
+    }
+    final String text;
+    try {
+      text = ServiceRecord.tst(records, erase.isChecked());
+    } catch (Exception e) {
+      message("Check the history: " + e.getMessage());
+      return;
+    }
+    Uri document = Uri.parse(address);
+    String name = "the opened TST file";
+    try (android.database.Cursor cursor =
+        getContentResolver()
+            .query(
+                document,
+                new String[] {android.provider.OpenableColumns.DISPLAY_NAME},
+                null,
+                null,
+                null)) {
+      if (cursor != null && cursor.moveToFirst()) name = cursor.getString(0);
+    } catch (Exception ignored) {
+    }
+    confirm(
+        "Replace opened TST?",
+        "Replace "
+            + name
+            + " with "
+            + records.size()
+            + " records? Export a separate backup first if needed."
+            + (erase.isChecked() ? "\nThe file will include an ERASE instruction for Tool32." : ""),
+        () -> {
+          try {
+            writeTstDocument(document, text);
+            message("Opened TST saved.");
+          } catch (Exception e) {
+            message(
+                "Could not overwrite the file: "
+                    + e.getMessage()
+                    + ". Use Export Toolset32 .tst to save a new copy.");
+          }
+        });
+  }
+
+  void writeTstDocument(Uri document, String text) throws IOException {
+    try (OutputStream out = getContentResolver().openOutputStream(document, "wt")) {
+      if (out == null) throw new IOException("The file provider did not open the document");
+      out.write(text.getBytes(StandardCharsets.UTF_8));
     }
   }
 
@@ -977,6 +1081,23 @@ public final class MainActivity extends Activity {
               records.addAll(imported);
               vinInput.setText(newVin);
               erase.setChecked(false);
+              boolean tst = !(text.startsWith("{") || text.startsWith("["));
+              if (tst) {
+                try {
+                  if ((data.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0)
+                    getContentResolver()
+                        .takePersistableUriPermission(
+                            data.getData(),
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                  else
+                    getContentResolver()
+                        .takePersistableUriPermission(
+                            data.getData(), Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (SecurityException ignored) {
+                }
+              }
+              prefs().edit().putString("opened_tst", tst ? data.getData().toString() : "").apply();
               changed();
             });
       }

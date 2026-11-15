@@ -40,7 +40,8 @@ public class AppSmokeTest extends Instrumentation {
           if (text.equalsIgnoreCase(x.getText() == null ? "" : x.getText().toString())) return x;
       Thread.sleep(100);
     }
-    throw new AssertionError("Missing UI text " + text);
+    throw new AssertionError(
+        "Missing UI text " + text + ": " + allText(getUiAutomation().getRootInActiveWindow()));
   }
 
   void click(String text) throws Exception {
@@ -104,19 +105,41 @@ public class AppSmokeTest extends Instrumentation {
       String source = "statist1c/BMW-Service-History-Manager";
       String sha = "sha256:" + String.join("", Collections.nCopies(64, "a"));
       for (String name : Arrays.asList("BMW-Service-Manager-v0.4.0.apk", "Any New Name.APK")) {
-        ok(Updater.choose(new JSONArray().put(release("v0.4.0", false, name, source, sha)),
-            "0.2.1", source) != null, "Accept arbitrary APK filename: " + name);
+        ok(
+            Updater.choose(
+                    new JSONArray().put(release("v0.4.0", false, name, source, sha)),
+                    "0.2.1",
+                    source)
+                != null,
+            "Accept arbitrary APK filename: " + name);
       }
       JSONObject multiple = release("v0.4.0", false, "one.apk", source, sha);
-      multiple.getJSONArray("assets").put(release("v0.4.0", false, "two.apk", source, sha)
-          .getJSONArray("assets").getJSONObject(0));
-      ok(Updater.choose(new JSONArray().put(multiple), "0.2.1", source) == null,
+      multiple
+          .getJSONArray("assets")
+          .put(
+              release("v0.4.0", false, "two.apk", source, sha)
+                  .getJSONArray("assets")
+                  .getJSONObject(0));
+      ok(
+          Updater.choose(new JSONArray().put(multiple), "0.2.1", source) == null,
           "Reject ambiguous multiple APKs");
-      ok(Updater.choose(new JSONArray().put(release("v0.4.0", false, "source.zip", source, sha)),
-          "0.2.1", source) == null, "Ignore non-APK assets");
+      ok(
+          Updater.choose(
+                  new JSONArray().put(release("v0.4.0", false, "source.zip", source, sha)),
+                  "0.2.1",
+                  source)
+              == null,
+          "Ignore non-APK assets");
       JSONObject newest = release("v0.5.0", false, "renamed.apk", source, sha);
-      ok(Updater.choose(new JSONArray().put(newest).put(release("v0.4.0", false,
-          "older.apk", source, sha)), "0.2.1", source).tag.equals("v0.5.0"),
+      ok(
+          Updater.choose(
+                  new JSONArray()
+                      .put(newest)
+                      .put(release("v0.4.0", false, "older.apk", source, sha)),
+                  "0.2.1",
+                  source)
+              .tag
+              .equals("v0.5.0"),
           "Choose newest version independent of release ordering");
       JSONObject draft = release("v0.6.0", false, "draft.apk", source, sha).put("draft", true);
       ok(Updater.choose(new JSONArray().put(draft), "0.2.1", source) == null, "Ignore draft");
@@ -156,6 +179,7 @@ public class AppSmokeTest extends Instrumentation {
       click("Engine oil");
       click("Save");
       ui(() -> ok(app.records.size() == 1, "Save record through native dialog"));
+      editorChecks();
       ui(
           () -> {
             app.reset.setChecked(false);
@@ -332,6 +356,102 @@ public class AppSmokeTest extends Instrumentation {
       if (found != null) return found;
     }
     return null;
+  }
+
+  void clickDescription(String desc) throws Exception {
+    AccessibilityNodeInfo field = description(getUiAutomation().getRootInActiveWindow(), desc);
+    if (field == null || !field.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+      throw new AssertionError("Cannot click " + desc);
+    waitForIdleSync();
+    for (int n = 0; n < 4; n++) {
+      scrollBack(getUiAutomation().getRootInActiveWindow());
+      waitForIdleSync();
+    }
+  }
+
+  boolean scrollBack(AccessibilityNodeInfo node) {
+    if (node == null) return false;
+    if (node.isScrollable())
+      return node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
+    for (int n = 0; n < node.getChildCount(); n++) if (scrollBack(node.getChild(n))) return true;
+    return false;
+  }
+
+  void editorChecks() throws Exception {
+    ui(() -> app.editRecord(0));
+    click("Add service item");
+    click("Brake fluid");
+    click("Move item up");
+    click("Save");
+    ui(() -> ok(app.records.get(0).items.get(0).code == 3, "Reorder items in record"));
+    ui(() -> app.editRecord(0));
+    click("Edit Brake fluid");
+    clickDescription("Service type");
+    click("Engine oil");
+    click("Save");
+    click("Cancel");
+    ui(
+        () ->
+            ok(
+                app.records.get(0).items.get(0).code == 3,
+                "Cancel record discards nested item edits"));
+    ui(() -> app.editRecord(0));
+    click("Edit Brake fluid");
+    clickDescription("Service type");
+    click("Front brakes");
+    click("Save");
+    click("Save");
+    ui(() -> ok(app.records.get(0).items.get(0).code == 2, "Change service type directly"));
+    ui(() -> app.editRecord(0));
+    click("Insert new items at the top");
+    click("Add service item");
+    click("Fuel filter");
+    click("Save");
+    ui(() -> ok(app.records.get(0).items.get(0).code == 12, "Insert item at top"));
+    ServiceRecord original = app.records.get(0);
+    ui(() -> app.editRecord(-1, true));
+    click("Add service item");
+    click("Engine oil");
+    click("Save");
+    ui(() -> ok(app.records.get(1) == original, "Insert record at top"));
+    ui(() -> app.editRecord(-1, false));
+    click("Add service item");
+    click("Brake fluid");
+    click("Save");
+    ui(() -> ok(app.records.get(2).items.get(0).code == 3, "Insert record at bottom"));
+    ui(
+        () -> {
+          app.records.clear();
+          app.records.add(original);
+          app.changed();
+        });
+    java.io.File file = new java.io.File(app.getFilesDir(), "save-back-test.tst");
+    java.nio.file.Files.write(file.toPath(), new byte[4096]);
+    ui(
+        () -> {
+          app.erase.setChecked(false);
+          app.prefs()
+              .edit()
+              .putString("opened_tst", android.net.Uri.fromFile(file).toString())
+              .apply();
+          app.saveOpenedTst();
+        });
+    node("Replace opened TST?");
+    click("Cancel");
+    ok(file.length() == 4096, "Cancel overwrite leaves original file intact");
+    ui(() -> app.saveOpenedTst());
+    click("Continue");
+    node("Opened TST saved.");
+    click("OK");
+    String saved =
+        new String(
+            java.nio.file.Files.readAllBytes(file.toPath()),
+            java.nio.charset.StandardCharsets.UTF_8);
+    ok(
+        saved.equals(ServiceRecord.tst(app.records, false)),
+        "Save back truncates and writes exact TST");
+    ok(ServiceRecord.parseTst(saved).records.size() == 1, "Saved TST imports successfully");
+    ui(() -> app.prefs().edit().remove("opened_tst").apply());
   }
 
   void setDescriptionText(String desc, String value) throws Exception {

@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Version for the APK (v0.2.1)
+        description: Version for the APK (v0.2.2)
         required: true
         type: string
 permissions:

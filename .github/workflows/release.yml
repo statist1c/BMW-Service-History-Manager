@@ -54,9 +54,9 @@ jobs:
         run: |
           mkdir -p release
           cp app/build/outputs/apk/release/app-release.apk "release/BMW-Service-Manager-${RELEASE_TAG}.apk"
-          git archive --format=zip -o release/BMW-Service-Manager-source.zip HEAD
+          git archive --format=zip -o "release/BMW-Service-Manager-${RELEASE_TAG}-source.zip" HEAD
           cd release
-          sha256sum "BMW-Service-Manager-${RELEASE_TAG}.apk" BMW-Service-Manager-source.zip > SHA256SUMS.txt
+          sha256sum "BMW-Service-Manager-${RELEASE_TAG}.apk" "BMW-Service-Manager-${RELEASE_TAG}-source.zip" > "BMW-Service-Manager-${RELEASE_TAG}-SHA256SUMS.txt"
       - name: Save files for manual release upload
         uses: actions/upload-artifact@v4
         with:

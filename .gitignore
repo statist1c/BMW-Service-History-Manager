@@ -1,0 +1,7 @@
+.gradle/
+**/build/
+local.properties
+*.jks
+*.p12
+keystore-password.txt
+Private-Signing-Kit/

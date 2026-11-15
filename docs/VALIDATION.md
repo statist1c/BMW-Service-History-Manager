@@ -1,0 +1,49 @@
+# Validation record — 15 November 2026
+
+## 0.1.1 alignment fix
+
+Bottom navigation labels now explicitly fill each tab's width and center their text beneath its icon. Release assembly and `lintRelease` passed. The release-signed v0.1.1 / versionCode 1001 installed successfully over v0.1.0 without uninstalling. The corrected light-theme layout was visually inspected; the four label bounds have equal widths and aligned top/bottom edges. Screenshots were refreshed. Existing protocol and updater checks below describe the original 0.1.0 validation; no vehicle/protocol behavior changed in 0.1.1.
+
+## Completed locally
+
+* JDK 17 / Gradle 8.9 / Android Gradle Plugin 8.7.3 / Android SDK 35.
+* Debug APK, platform-only Android test APK and signed release APK assembled successfully.
+* `lintDebug` and `lintRelease` passed with **0 errors**. Remaining warnings concern English UI strings/localization, UI drawing allocation and legacy platform UI APIs; this preview does not claim translated UI.
+* **40 core checks passed**, using the upstream `tests/test_records.py` binary fixture, zero-padded dealer fields, unsigned boundary values, EDIABAS/TST round trips, malformed input rejection, CBS decode/reset ownership and payloads, and a local TCP gateway double exercising ACK, alive-check response, response-pending and rejected response echoes. No vehicle was contacted for these checks.
+* **18 Android instrumentation checks passed** on an Android 15 / API 35 emulator, including real native record-dialog interaction, saving, JSON object/array interchange, integer-overflow rejection, exact preview, Unknown/MGU write guard and local persistence. An additional screenshot run passed **19 checks**, including dark-theme recreation.
+* Updater metadata fixtures verify newer stable release selection, rejection of prereleases, same/older releases, other-repository APK URLs and missing GitHub SHA-256 digest.
+* Local APK fixtures verify acceptance of a newer APK with the same signing identity; rejection of wrong size, wrong SHA-256, another signer, another package, same-version APK and mismatched release tag/versionName. The provider refuses arbitrary file paths.
+* Release APK signature verified with Android `apksigner`, APK Signature Scheme v2, RSA 3072-bit. The signed APK was installed and launched on the emulator separately from the debug test build.
+* Light history, dark history, vehicle and dark settings screens were captured from the actual app. History/vehicle screens were visually inspected; screenshots are in `docs/screenshots/`.
+* The upstream license is preserved in the project and APK assets. Source packaging excludes build outputs, local SDK paths, test APK fixtures and private signing material.
+
+Release signing certificate SHA-256:
+
+```text
+9f9cc9906c59b39791b443f7b5727fe48ea24e50da7bed8aa54b3bb48b3fa173
+```
+
+## Not established by these checks
+
+* No BMW hardware or actual vehicle was available. ENET adapter behavior, phone routing, ECU responses, supported vehicle coverage, real history writes/erases/restarts and CBS resets remain unvalidated on Android.
+* Upstream's F48 NBT Evo testing is upstream evidence, not validation of this Android application. MGU / iDrive 7–8 compatibility is not established; mutations remain disabled for the Unknown/MGU selection.
+* There is no service-history read-back verification or rollback. An accepted ECU response is not proof that every entry is displayed correctly in iDrive.
+* The configured GitHub repository existed but had no published newer APK during implementation. Update selection and APK authentication were tested with local fixtures; an end-to-end Internet update requires a newer public release. The included GitHub workflow has not been run on GitHub by this task and needs the private signing secrets set by the owner.
+* Daily background timing is controlled by Android. No silent downloads/installation, push notification service, Google Play integration or authenticated private-repository updater is included.
+
+## Re-run Android tests
+
+Build/install debug and debugAndroidTest APKs on a dedicated emulator, then run:
+
+```text
+adb shell am instrument -w dev.mgu.service.test/dev.mgu.service.AppSmokeTest
+```
+
+The tests create and clear the app's local records. For optional APK authentication cases, create `files/update-tests/` in the debug app's private storage using `adb shell run-as dev.mgu.service`. Place:
+
+* `valid.apk`: same package, same debug signing key, versionName 0.1.1 and versionCode 1001.
+* `other-signer.apk`: same package/version as valid, but a different signing key.
+* `other-package.apk`: any properly signed different-package APK.
+* `old.apk`: the installed 0.1.0 / versionCode 1000 debug APK.
+
+Then run with `-e fixtures true`; `-e screenshots true` also records theme screenshots in the test app's `files/screenshots/`. Fixture APKs are test-only and are not part of the source/release downloads. These fixtures target an installed test build of **0.1.0 / 1000**: explicitly set Gradle properties `appVersionName=0.1.0` and `appVersionCode=1000` when building that target/runner, because the current project defaults to 0.1.1. Use a dedicated emulator.

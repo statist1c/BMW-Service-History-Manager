@@ -1,6 +1,6 @@
 # BMW Service History Manager for Android
 
-Native Android adaptation of [devttys1/bmw-service-manager](https://github.com/devttys1/bmw-service-manager), with the rounded cards, line icons, bottom navigation, and light/dark/system themes used by the user's MGU companion apps.
+Native Android app for creating, editing and organising BMW service history, with JSON and Toolset32 TST import/export, modern themes, and experimental ENET vehicle connectivity.
 
 **Version:** 0.2.2 · Android 8.0+ · universal APK, no bundled native libraries. Independent project; no BMW affiliation. Vehicle operations, including MGU history support, are experimental and have **not** been validated on a BMW from Android.
 

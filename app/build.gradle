@@ -6,8 +6,8 @@ android {
   applicationId 'dev.mgu.service'
   minSdk 26
   targetSdk 35
-  versionCode = (project.findProperty('appVersionCode') ?: '1001').toInteger()
-  versionName = (project.findProperty('appVersionName') ?: '0.1.1')
+  versionCode = (project.findProperty('appVersionCode') ?: '2000').toInteger()
+  versionName = (project.findProperty('appVersionName') ?: '0.2.0')
   testInstrumentationRunner 'dev.mgu.service.AppSmokeTest'
   buildConfigField 'String', 'UPDATE_REPOSITORY', '"statist1c/BMW-Service-History-Manager"'
  }

@@ -111,6 +111,11 @@ public class AppSmokeTest extends Instrumentation {
       ok(rejected, "Reject integer overflow in JSON");
       if (args != null && "true".equals(args.getString("fixtures"))) fixtureChecks();
       Updater.prefs(getTargetContext()).edit().putBoolean("automatic", false).apply();
+      getTargetContext()
+          .getSharedPreferences("settings", 0)
+          .edit()
+          .putString("theme", "Light")
+          .apply();
       app =
           (MainActivity)
               startActivitySync(
@@ -127,6 +132,52 @@ public class AppSmokeTest extends Instrumentation {
       click("Engine oil");
       click("Save");
       ui(() -> ok(app.records.size() == 1, "Save record through native dialog"));
+      ui(
+          () -> {
+            app.reset.setChecked(false);
+            app.previewSelected(0);
+          });
+      node("Selected record · request preview");
+      AccessibilityNodeInfo root = getUiAutomation().getRootInActiveWindow();
+      String previewText = allText(root);
+      ok(
+          previewText.contains("31 01 a0 81") && !previewText.contains("31 01 a0 80"),
+          "Selected record preview never erases history");
+      ok(
+          previewText.indexOf("31 01 a0 81") == previewText.lastIndexOf("31 01 a0 81"),
+          "Exactly one selected-record add request");
+      click("Close");
+      ui(() -> app.editArguments(0));
+      setDescriptionText("EDIABAS arguments", "29;2;2024;0;123456;0;00181;0x1;1;1;0x1;0;0");
+      click("Save locally");
+      ui(
+          () ->
+              ok(
+                  app.records.get(0).mileage == 123456
+                      && app.records.get(0).date.toString().equals("2024-02-29"),
+                  "EDIABAS editor saves validated local record"));
+      ui(() -> app.editArguments(0));
+      setDescriptionText("EDIABAS arguments", "invalid");
+      click("Save locally");
+      ui(() -> ok(app.records.get(0).mileage == 123456, "Invalid arguments do not change record"));
+      click("Cancel");
+      final android.widget.EditText[] date = new android.widget.EditText[1];
+      ui(
+          () -> {
+            date[0] = new android.widget.EditText(app);
+            date[0].setText("2024-02-29");
+            app.chooseDate(date[0]);
+          });
+      waitForIdleSync();
+      ok(
+          allText(getUiAutomation().getRootInActiveWindow()).contains("2024"),
+          "Calendar shows selected service year");
+      click("OK");
+      ui(
+          () ->
+              ok(
+                  date[0].getText().toString().equals("2024-02-29"),
+                  "Calendar uses selected leap-day date"));
       ui(() -> app.preview());
       node("Exact UDS request preview");
       click("Close");
@@ -138,10 +189,49 @@ public class AppSmokeTest extends Instrumentation {
             app.backup.setChecked(true);
             app.write();
           });
-      node(
-          "Select a supported upstream head-unit family. MGU / unknown vehicle changes are"
-              + " disabled.");
+      node("Select a head-unit family first. Unknown vehicle changes are disabled.");
       click("OK");
+      ui(() -> app.independentControl(false));
+      node("Select a head-unit family first. Unknown vehicle changes are disabled.");
+      click("OK");
+      ui(() -> app.independentControl(true));
+      node("Select a head-unit family first. Unknown vehicle changes are disabled.");
+      click("OK");
+      ui(() -> ok(!app.busy, "Standalone controls send nothing for unsupported family"));
+      ui(
+          () -> {
+            app.family.setSelection(6);
+            app.route.setSelection(1);
+            try {
+              MainActivity.Target target = app.new Target();
+              app.identified = target.key() + "|" + target.ip + " · WBA12345678901234";
+              deniedTarget("Acknowledge experimental MGU");
+              app.mguConsent.setChecked(true);
+              deniedTarget("read head-unit identification");
+              app.headUnitIdentity = app.identified;
+              ok(
+                  app.mutationTarget().key().equals(target.key()),
+                  "MGU gate permits only explicit scoped identity acknowledgement");
+              app.headUnitIdentity = app.identified + "stale";
+              deniedTarget("read head-unit identification");
+              Cbs item = new Cbs();
+              item.code = 1;
+              app.resetCbs(item);
+            } catch (Exception e) {
+              throw new AssertionError(e);
+            }
+          });
+      node(
+          "CBS resets on MGU-equipped vehicles remain disabled pending cluster validation. MGU mode"
+              + " currently supports head-unit history operations only.");
+      click("OK");
+      ui(
+          () -> {
+            ok(!app.busy, "MGU CBS reset sends no requests");
+            app.family.setSelection(0);
+            app.identified = "";
+            app.headUnitIdentity = "";
+          });
       ui(
           () -> {
             app.select(3);
@@ -190,6 +280,44 @@ public class AppSmokeTest extends Instrumentation {
 
   interface Checked {
     void run() throws Exception;
+  }
+
+  void deniedTarget(String message) throws Exception {
+    try {
+      app.mutationTarget();
+      throw new AssertionError("Expected MGU gate rejection");
+    } catch (java.io.IOException e) {
+      ok(e.getMessage().contains(message), "MGU guard: " + message);
+    }
+  }
+
+  String allText(AccessibilityNodeInfo node) {
+    if (node == null) return "";
+    StringBuilder text = new StringBuilder(node.getText() == null ? "" : node.getText());
+    for (int n = 0; n < node.getChildCount(); n++)
+      text.append('\n').append(allText(node.getChild(n)));
+    return text.toString();
+  }
+
+  AccessibilityNodeInfo description(AccessibilityNodeInfo node, String desc) {
+    if (node == null) return null;
+    if (desc.contentEquals(
+        node.getContentDescription() == null ? "" : node.getContentDescription())) return node;
+    for (int n = 0; n < node.getChildCount(); n++) {
+      AccessibilityNodeInfo found = description(node.getChild(n), desc);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
+  void setDescriptionText(String desc, String value) throws Exception {
+    AccessibilityNodeInfo field = description(getUiAutomation().getRootInActiveWindow(), desc);
+    if (field == null) throw new AssertionError("Missing field " + desc);
+    Bundle args = new Bundle();
+    args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value);
+    if (!field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args))
+      throw new AssertionError("Cannot edit " + desc);
+    waitForIdleSync();
   }
 
   void screenshot(String name) throws Exception {

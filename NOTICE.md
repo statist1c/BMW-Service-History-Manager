@@ -15,6 +15,8 @@ Ported sources and behavior:
 
 Android changes include a new platform-native UI matching the user's MGU companion apps, phone storage and file pickers, stricter validation and response matching, absolute transport deadlines, explicit phone-network binding, VIN checks, gated mutation controls, and a GitHub APK updater. The updater/version/provider scaffolding was adapted from the user's earlier MGU FSC Android project, generated in the same workspace; no additional external runtime library is bundled.
 
+Version 0.2.0 adds selected-record writing, standalone erase/restart, a native date picker, a validated EDIABAS argument editor, read-only ECU identification and an experimental MGU history profile. The older HU-ServiceManager supplied by the user was inspected for behavior only: its JAR, icon, JavaFX libraries, EDIABAS implementation and assets are not bundled or copied. Locally installed BMW diagnostic descriptions were inspected for protocol interoperability; no proprietary PRG files, disassembly or runtime are distributed. See `docs/MGU-SUPPORT.md` for evidence and limits.
+
 Upstream documents the history layout as observed in SHM.exe, and the Toolset32 interchange as compatible with theDeniZ/ServiceManager. These tools and their binaries are not included.
 
 The Gradle wrapper JAR and scripts are build tooling under Apache License 2.0. The Gradle distribution's license and notice are included in `licenses/`; the downloaded build tools retain their respective licenses. The APK has no third-party application-library dependencies. Android's platform UI, fonts and JSON implementation are provided by the device, not copied into this project. Upstream Flask/Python dependencies, web fonts, web libraries, map imagery and car models are not bundled.

@@ -162,6 +162,25 @@ public final class ServiceRecord {
     return r;
   }
 
+  /**
+   * Strict editor validation; the legacy TST importer retains upstream's optional-field tolerance.
+   */
+  public static ServiceRecord fromEditorArgs(String text) {
+    String args = text.trim();
+    if (args.endsWith(";")) args = args.substring(0, args.length() - 1);
+    String[] fields = args.split(";", -1);
+    if (fields.length < 9)
+      throw new IllegalArgumentException("A record needs its 9 header fields and service items");
+    long count = number(fields[8]);
+    if (count < 1 || count > 13 || fields.length != 9 + count * 4)
+      throw new IllegalArgumentException(
+          "Item count must match exactly 4 fields per item (1–13 items)");
+    long dealerFlag = number(fields[5]);
+    if (dealerFlag != 0 && dealerFlag != 1)
+      throw new IllegalArgumentException("BMW-dealer flag must be 0 or 1");
+    return fromArgs(args);
+  }
+
   public static final class Imported {
     public final List<ServiceRecord> records = new ArrayList<>();
     public boolean erase;

@@ -1,10 +1,16 @@
 # Validation record — 15 November 2026
 
+## 0.2.0 feature and MGU update
+
+Debug/release builds, Android test APK, `lintDebug` and `lintRelease` passed. **40 core checks + 37 feature checks + 23 Android instrumentation checks passed.** New checks cover strict EDIABAS argument validation, selected-record preview containing exactly one add and no erase request, native argument editing, invalid-argument retention, a native calendar preserving a leap-day date, Unknown-family mutation guards, MGU acknowledgement/identity binding, and the MGU CBS reset block. The read-only identification implementation is exercised against a local HSFZ gateway double: only service 0x22 requests are sent, text/binary values are displayed appropriately, and unavailable DIDs are reported individually. MGU status zero is accepted, memory-error status one is rejected, CIC's distinct success code is handled, missing status is rejected, and unvalidated MGU distance overflow is blocked.
+
+MGU protocol evidence comes from offline inspection of locally installed diagnostic descriptions, not hardware testing. No proprietary diagnostic files or disassembly are included. See `MGU-SUPPORT.md` for exact evidence and limitations. Existing in-app mutation confirmations and first-failure stop behavior remain in use. English only, as requested. The older HU-ServiceManager was compared offline; none of its program code/assets was reused. The release APK's signing identity was verified, and v0.2.0 installed and launched successfully over the release-signed v0.1.1 APK on the emulator.
+
 ## 0.1.1 alignment fix
 
 Bottom navigation labels now explicitly fill each tab's width and center their text beneath its icon. Release assembly and `lintRelease` passed. The release-signed v0.1.1 / versionCode 1001 installed successfully over v0.1.0 without uninstalling. The corrected light-theme layout was visually inspected; the four label bounds have equal widths and aligned top/bottom edges. Screenshots were refreshed. Existing protocol and updater checks below describe the original 0.1.0 validation; no vehicle/protocol behavior changed in 0.1.1.
 
-## Completed locally
+## Initial 0.1.0 checks completed locally
 
 * JDK 17 / Gradle 8.9 / Android Gradle Plugin 8.7.3 / Android SDK 35.
 * Debug APK, platform-only Android test APK and signed release APK assembled successfully.
@@ -26,7 +32,7 @@ Release signing certificate SHA-256:
 ## Not established by these checks
 
 * No BMW hardware or actual vehicle was available. ENET adapter behavior, phone routing, ECU responses, supported vehicle coverage, real history writes/erases/restarts and CBS resets remain unvalidated on Android.
-* Upstream's F48 NBT Evo testing is upstream evidence, not validation of this Android application. MGU / iDrive 7–8 compatibility is not established; mutations remain disabled for the Unknown/MGU selection.
+* Upstream's F48 NBT Evo testing is upstream evidence, not validation of this Android application. Real-vehicle MGU compatibility is not established. Version 0.2.0 implements experimental MGU history add/erase/restart from inspected protocol definitions; Unknown-family changes and MGU CBS resets remain disabled.
 * There is no service-history read-back verification or rollback. An accepted ECU response is not proof that every entry is displayed correctly in iDrive.
 * The configured GitHub repository existed but had no published newer APK during implementation. Update selection and APK authentication were tested with local fixtures; an end-to-end Internet update requires a newer public release. The included GitHub workflow has not been run on GitHub by this task and needs the private signing secrets set by the owner.
 * Daily background timing is controlled by Android. No silent downloads/installation, push notification service, Google Play integration or authenticated private-repository updater is included.

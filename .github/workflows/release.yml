@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Version for the APK (v0.1.1)
+        description: Version for the APK (v0.2.0)
         required: true
         type: string
 permissions:
@@ -34,8 +34,9 @@ jobs:
       - name: Core protocol checks
         run: |
           mkdir -p work/test-classes
-          javac -d work/test-classes app/src/main/java/dev/mgu/service/ServiceRecord.java app/src/main/java/dev/mgu/service/Hsfz.java app/src/main/java/dev/mgu/service/Cbs.java tests/CoreTest.java
+          javac -d work/test-classes app/src/main/java/dev/mgu/service/ServiceRecord.java app/src/main/java/dev/mgu/service/Hsfz.java app/src/main/java/dev/mgu/service/Cbs.java app/src/main/java/dev/mgu/service/HeadUnitInfo.java app/src/main/java/dev/mgu/service/HeadUnitProtocol.java tests/CoreTest.java tests/FeatureTest.java
           java -cp work/test-classes dev.mgu.service.CoreTest
+          java -cp work/test-classes dev.mgu.service.FeatureTest
       - name: Restore private signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

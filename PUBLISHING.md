@@ -18,8 +18,8 @@ Alias: `bmw-service`. Store password and key password are the same value, suppli
 2. In the GitHub repository, create Actions secrets:
    * `ANDROID_KEYSTORE_BASE64`: base64 of `bmw-service-release.jks` from the private kit.
    * `ANDROID_KEYSTORE_PASSWORD`: the exact password from `keystore-password.txt`.
-3. Optionally run `.github/workflows/release.yml` manually from Actions, using the desired version such as `v0.1.1`. It builds the selected branch, runs core checks and Android lint, signs the APK and saves an Actions artifact containing `BMW-Service-Manager.apk`, `SHA256SUMS.txt` and a source ZIP. It does not run on pushes or release creation, and never creates a release or uploads release assets.
-4. Download the artifact and attach the APK yourself to a stable release with the matching version tag. You can also upload the supplied signed v0.1.1 APK directly without running the workflow. For later updates, use a higher stable version. The workflow derives versionName and versionCode from its version input: `major*1,000,000 + minor*1,000 + patch`. Components minor/patch must be below 1,000. Version `0.1.1` is versionCode 1001.
+3. Optionally run `.github/workflows/release.yml` manually from Actions, using the desired version such as `v0.2.0`. It builds the selected branch, runs core checks and Android lint, signs the APK and saves an Actions artifact containing `BMW-Service-Manager.apk`, `SHA256SUMS.txt` and a source ZIP. It does not run on pushes or release creation, and never creates a release or uploads release assets.
+4. Download the artifact and attach the APK yourself to a stable release with the matching version tag. You can also upload the supplied signed v0.2.0 APK directly without running the workflow. For later updates, use a higher stable version. The workflow derives versionName and versionCode from its version input: `major*1,000,000 + minor*1,000 + patch`. Components minor/patch must be below 1,000. Version `0.2.0` is versionCode 2000.
 5. Confirm GitHub's release asset metadata includes its SHA-256 digest. The app intentionally will not offer APKs missing that digest, mismatched names, drafts, prereleases or nonstable tags. GitHub-generated source archives alone are not installable APKs.
 
 To create the base64 secret without displaying it, encode the keystore to a local file and paste that value into the secret field. Delete that temporary file after setting the secret. Never place the password/base64 directly into a shell command or log.
@@ -29,7 +29,7 @@ To create the base64 secret without displaying it, encode the keystore to a loca
 Set `BMW_KEYSTORE_PASSWORD` in the process environment from your private password file, then run:
 
 ```text
-bash gradlew assembleRelease -PreleaseKeystore=/absolute/private/path/bmw-service-release.jks -PappVersionName=0.1.1 -PappVersionCode=1001
+bash gradlew assembleRelease -PreleaseKeystore=/absolute/private/path/bmw-service-release.jks -PappVersionName=0.2.0 -PappVersionCode=2000
 ```
 
 On Windows, use `gradlew.bat` and a Windows absolute path, and quote each `-P...` argument in PowerShell. The keystore argument is resolved relative to the `app` module if it is not absolute. Rename/copy `app/build/outputs/apk/release/app-release.apk` to **`BMW-Service-Manager.apk`** before attaching it to the matching stable GitHub release. Always increment both versions, sign with the same key, and retain the noncommercial license and notices.

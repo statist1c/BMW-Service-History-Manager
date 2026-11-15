@@ -25,6 +25,7 @@ public final class MainActivity extends Activity {
   String theme,
       vin = "",
       identified = "",
+      headUnitIdentity = "",
       planned = "",
       cbsTarget = "",
       session = "No vehicle operations yet.\n",
@@ -41,7 +42,7 @@ public final class MainActivity extends Activity {
   TextView status, log, summary, identity, updates;
   EditText host, port, vinInput;
   Spinner route, family;
-  CheckBox erase, reset, experimental, backup;
+  CheckBox erase, reset, experimental, backup, mguConsent;
   String operationState = "Offline workspace · vehicle not checked";
 
   SharedPreferences prefs() {
@@ -329,6 +330,12 @@ public final class MainActivity extends Activity {
           if (available()) editRecord(-1);
         });
     button(
+        "Add from EDIABAS arguments…",
+        false,
+        () -> {
+          if (available()) editArguments(-1);
+        });
+    button(
         "Sort by mileage ↓",
         false,
         () -> {
@@ -396,6 +403,18 @@ public final class MainActivity extends Activity {
           false,
           () -> {
             if (available()) editRecord(at);
+          });
+      button(
+          "EDIABAS arguments…",
+          false,
+          () -> {
+            if (available()) editArguments(at);
+          });
+      button(
+          "Write selected record…",
+          false,
+          () -> {
+            if (available()) previewSelected(at);
           });
       if (n > 0)
         button(
@@ -480,6 +499,209 @@ public final class MainActivity extends Activity {
     return e.getText().toString().trim();
   }
 
+  void chooseDate(EditText field) {
+    LocalDate selected;
+    try {
+      selected = LocalDate.parse(val(field));
+    } catch (Exception e) {
+      selected = LocalDate.now();
+    }
+    DatePickerDialog dialog =
+        new DatePickerDialog(
+            this,
+            (picker, year, month, day) ->
+                field.setText(LocalDate.of(year, month + 1, day).toString()),
+            selected.getYear(),
+            selected.getMonthValue() - 1,
+            selected.getDayOfMonth());
+    dialog.setTitle("Service date");
+    dialog.show();
+  }
+
+  void editArguments(int index) {
+    if (index < 0 && records.size() >= 2000) {
+      message("Maximum 2000 records");
+      return;
+    }
+    LinearLayout view = new LinearLayout(this);
+    view.setOrientation(LinearLayout.VERTICAL);
+    view.setPadding(dp(20), dp(8), dp(20), dp(16));
+    TextView help =
+        text(
+            "Edit the semicolon-separated arguments for one STEUERN_SERVICEHISTORY_ADD record."
+                + " Saving updates the local workspace only; it sends nothing to the vehicle.\n\n"
+                + "Day;month;year;correction;km;BMW-dealer flag;dealer;status;item count; then"
+                + " code;status;distance;months for each item.",
+            13,
+            MUTED);
+    view.addView(help);
+    EditText args = new EditText(this);
+    args.setTextColor(INK);
+    args.setTextSize(14);
+    args.setTypeface(Typeface.MONOSPACE);
+    args.setInputType(
+        InputType.TYPE_CLASS_TEXT
+            | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+    args.setMinLines(4);
+    args.setMaxLines(8);
+    args.setGravity(Gravity.TOP);
+    args.setContentDescription("EDIABAS arguments");
+    args.setText(index < 0 ? "" : records.get(index).args());
+    view.addView(args, new LinearLayout.LayoutParams(-1, -2));
+    ScrollView scroll = new ScrollView(this);
+    scroll.addView(view);
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("EDIABAS record arguments")
+            .setView(scroll)
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Copy", null)
+            .setPositiveButton("Save locally", null)
+            .create();
+    dialog.setOnShowListener(
+        d -> {
+          dialog
+              .getButton(AlertDialog.BUTTON_NEUTRAL)
+              .setOnClickListener(
+                  v -> {
+                    getSystemService(ClipboardManager.class)
+                        .setPrimaryClip(
+                            ClipData.newPlainText(
+                                "EDIABAS service arguments", args.getText().toString()));
+                    Toast.makeText(this, "Arguments copied", Toast.LENGTH_SHORT).show();
+                  });
+          dialog
+              .getButton(AlertDialog.BUTTON_POSITIVE)
+              .setOnClickListener(
+                  v -> {
+                    try {
+                      if (!available()) return;
+                      ServiceRecord record = ServiceRecord.fromEditorArgs(val(args));
+                      if (index < 0) records.add(record);
+                      else records.set(index, record);
+                      changed();
+                      dialog.dismiss();
+                    } catch (Exception e) {
+                      args.setError("Invalid service arguments: " + e.getMessage());
+                    }
+                  });
+        });
+    dialog.show();
+  }
+
+  void identifyHeadUnit() {
+    if (!available()) return;
+    try {
+      Target target = new Target();
+      final String checked = identified.startsWith(target.key() + "|") ? identified : "";
+      headUnitIdentity = "";
+      work(
+          "Head-unit identification",
+          () -> {
+            try (Hsfz client = client(target)) {
+              HeadUnitInfo.Result result = HeadUnitInfo.readDetailed(client, this::append);
+              handler.post(
+                  () -> {
+                    if (result.supported > 0 && identified.equals(checked))
+                      headUnitIdentity = checked;
+                    showText("Head-unit identification", target.ip + "\n\n" + result.report);
+                  });
+            }
+          });
+    } catch (Exception e) {
+      message(e.getMessage());
+    }
+  }
+
+  void independentControl(boolean eraseOnly) {
+    if (!available()) return;
+    try {
+      Target target = mutationTarget();
+      if (eraseOnly && !backup.isChecked())
+        throw new IOException(
+            "Back up the current iDrive history and tick the backup confirmation.");
+      final String expected = identified;
+      final String profile = family.getSelectedItem().toString();
+      final byte[] request =
+          eraseOnly ? new byte[] {0x31, 1, (byte) 0xa0, (byte) 0x80} : new byte[] {0x11, 1};
+      String name = eraseOnly ? "Erase vehicle history only" : "Restart head unit only";
+      confirm(
+          name + "?",
+          expected
+              + "\n\n"
+              + (eraseOnly
+                  ? "PERMANENTLY ERASES all service history stored in the head unit. No replacement"
+                      + " records will be written. This app cannot restore it."
+                  : "Restarts the head unit without changing service-history records. The screen"
+                      + " and connection may go offline temporarily.")
+              + "\n\nTarget 0x63 · TX "
+              + ServiceRecord.hex(request)
+              + "\n"
+              + "Park the vehicle, keep ignition on and stable battery power. Android real-car"
+              + " validation is pending.",
+          () ->
+              confirm(
+                  "Send this request now?",
+                  name + "\n" + expected + "\n\nKeep this app open until finished.",
+                  () -> {
+                    work(
+                        name,
+                        () -> {
+                          verifyIdentity(target, expected);
+                          try (Hsfz client = client(target)) {
+                            if (eraseOnly) routine(client, request, "Erase history", profile);
+                            else {
+                              append("Restart TX " + ServiceRecord.hex(request));
+                              append(
+                                  "Restart RX " + ServiceRecord.hex(client.request(0x63, request)));
+                            }
+                          }
+                          append(
+                              "Request accepted. Verify the outcome in iDrive. No automatic retries"
+                                  + " or rollback.");
+                        });
+                    select(2);
+                  }));
+    } catch (Exception e) {
+      message(e.getMessage());
+    }
+  }
+
+  void previewSelected(int index) {
+    if (!available()) return;
+    try {
+      final ServiceRecord record = HistoryJson.record(HistoryJson.record(records.get(index)));
+      final boolean restart = reset.isChecked();
+      final String exact = plan(Collections.singletonList(record), false, restart);
+      ScrollView scroll = new ScrollView(this);
+      TextView text =
+          text(
+              "Only this record will be added. Existing history is NOT erased. A duplicate can be"
+                  + " created if this entry is already in the vehicle.\n\n"
+                  + exact,
+              13,
+              INK);
+      text.setTypeface(Typeface.MONOSPACE);
+      text.setTextIsSelectable(true);
+      text.setPadding(dp(20), dp(12), dp(20), dp(16));
+      scroll.addView(text);
+      new AlertDialog.Builder(this)
+          .setTitle("Selected record · request preview")
+          .setView(scroll)
+          .setNegativeButton("Close", null)
+          .setPositiveButton(
+              "Continue to write…",
+              (d, w) -> {
+                planned = exact;
+                writeRecords(Collections.singletonList(record), false, restart);
+              })
+          .show();
+    } catch (Exception e) {
+      message(e.getMessage());
+    }
+  }
+
   void editRecord(int index) {
     if (index < 0 && records.size() >= 2000) {
       message("Maximum 2000 records");
@@ -503,6 +725,7 @@ public final class MainActivity extends Activity {
     body.setPadding(dp(20), dp(10), dp(20), dp(16));
     scroll.addView(body);
     EditText date = input("Date · YYYY-MM-DD", r.date.toString(), false);
+    button("Choose date…", false, () -> chooseDate(date));
     EditText km = input("Mileage · km", Long.toString(r.mileage), true);
     EditText dealer = input("Dealer number · up to 7 ASCII characters", r.dealer, false);
     CheckBox bmw = check("BMW dealer", r.bmw);
@@ -768,12 +991,41 @@ public final class MainActivity extends Activity {
     card(p, "Compatibility first");
     label(
         "Upstream lists CIC, NBT, NBT Evo, ENTRY and CHAMP2. It was developed on an F48 with NBT"
-            + " Evo. MGU / iDrive 7–8 service-history writing is unverified and disabled here.");
+            + " Evo. MGU service-history commands are implemented from inspected diagnostic"
+            + " definitions, but remain experimental and unvalidated on a real vehicle.");
     family =
         spinner(
             "Head-unit family",
-            new String[] {"Unknown / MGU · read only", "CIC", "NBT", "NBT Evo", "ENTRY", "CHAMP2"},
+            new String[] {
+              "Unknown · read only",
+              "CIC",
+              "NBT",
+              "NBT Evo",
+              "ENTRY",
+              "CHAMP2",
+              "MGU · experimental"
+            },
             0);
+    mguConsent =
+        check("I understand MGU history support is experimental and not vehicle-validated", false);
+    TextView mguHelp =
+        label(
+            "For MGU changes: check vehicle identity, then read head-unit identification on the"
+                + " same connection. Model selection is manual. CBS resets on MGU-equipped vehicles"
+                + " remain disabled pending cluster validation.");
+    mguConsent.setVisibility(View.GONE);
+    mguHelp.setVisibility(View.GONE);
+    family.setOnItemSelectedListener(
+        new AdapterView.OnItemSelectedListener() {
+          public void onNothingSelected(AdapterView<?> parent) {}
+
+          public void onItemSelected(AdapterView<?> parent, View view, int index, long id) {
+            boolean mgu = index == 6;
+            mguConsent.setVisibility(mgu ? View.VISIBLE : View.GONE);
+            mguHelp.setVisibility(mgu ? View.VISIBLE : View.GONE);
+            if (!mgu) mguConsent.setChecked(false);
+          }
+        });
     card(p, "1   Connect over ENET");
     label(
         "Use an ENET cable and compatible USB-C Ethernet adapter, or an ENET Wi-Fi adapter. Phone"
@@ -791,6 +1043,7 @@ public final class MainActivity extends Activity {
     button("Find vehicle on selected network", false, () -> discover());
     button("Check vehicle identity", true, () -> identify());
     identity = label("No vehicle identity checked this session.");
+    button("Read head-unit identification", false, () -> identifyHeadUnit());
     card(p, "2   Preview the write");
     erase = check("Erase existing vehicle history first", false);
     reset = check("Restart head unit after successful write", true);
@@ -801,6 +1054,13 @@ public final class MainActivity extends Activity {
     experimental = check("Enable experimental vehicle changes this session", false);
     backup = check("I have backed up the history currently in iDrive", false);
     button("Write service history…", true, () -> write());
+    card(p, "Independent head-unit controls");
+    label(
+        "These controls work without writing any service records. They require the same vehicle"
+            + " identity and supported-family checks. Erasing is permanent and cannot be undone by"
+            + " this app.");
+    button("Restart head unit only…", false, () -> independentControl(false));
+    button("Erase vehicle history only…", false, () -> independentControl(true));
     card(p, "Service due · CBS");
     label(
         "Read-only scan of cluster slots 0x4101–0x417F. Each live response is shown with its raw"
@@ -1024,8 +1284,7 @@ public final class MainActivity extends Activity {
   Target mutationTarget() throws Exception {
     if (family.getSelectedItemPosition() == 0)
       throw new IOException(
-          "Select a supported upstream head-unit family. MGU / unknown vehicle changes are"
-              + " disabled.");
+          "Select a head-unit family first. Unknown vehicle changes are disabled.");
     if (!experimental.isChecked())
       throw new IOException("Enable experimental vehicle changes for this session first.");
     Target t = new Target();
@@ -1036,6 +1295,14 @@ public final class MainActivity extends Activity {
       throw new IOException("A valid vehicle VIN is required before changes.");
     if (!val(vinInput).isEmpty() && !val(vinInput).equalsIgnoreCase(found))
       throw new IOException("Workspace VIN does not match the connected vehicle.");
+    if (HeadUnitProtocol.isMgu(family.getSelectedItem().toString())) {
+      if (!mguConsent.isChecked())
+        throw new IOException("Acknowledge experimental MGU history support first.");
+      if (!identified.equals(headUnitIdentity))
+        throw new IOException(
+            "For MGU, check vehicle identity then read head-unit identification on this connection"
+                + " first.");
+    }
     return t;
   }
 
@@ -1046,19 +1313,24 @@ public final class MainActivity extends Activity {
   }
 
   void write() {
+    writeRecords(records, erase.isChecked(), reset.isChecked());
+  }
+
+  void writeRecords(List<ServiceRecord> selectedRecords, boolean er, boolean re) {
     if (!available()) return;
     try {
-      if (records.isEmpty()) throw new IOException("No records to write");
+      if (selectedRecords.isEmpty()) throw new IOException("No records to write");
       if (!backup.isChecked())
         throw new IOException(
             "Back up the current iDrive history and tick the backup confirmation.");
       Target t = mutationTarget();
-      boolean er = erase.isChecked(), re = reset.isChecked();
-      String exact = plan(records, er, re);
+      final String profile = family.getSelectedItem().toString();
+      HeadUnitProtocol.validateForProfile(selectedRecords, profile);
+      String exact = plan(selectedRecords, er, re);
       if (!exact.equals(planned))
         throw new IOException("Preview the exact requests after your latest changes first.");
       final List<ServiceRecord> snapshot =
-          HistoryJson.parse(new JSONObject(HistoryJson.dump(records, val(vinInput))));
+          HistoryJson.parse(new JSONObject(HistoryJson.dump(selectedRecords, val(vinInput))));
       String id = identified;
       confirm(
           "Review vehicle write",
@@ -1088,14 +1360,16 @@ public final class MainActivity extends Activity {
                               routine(
                                   h,
                                   new byte[] {0x31, 1, (byte) 0xa0, (byte) 0x80},
-                                  "Erase history");
+                                  "Erase history",
+                                  profile);
                               Thread.sleep(200);
                             }
                             for (ServiceRecord r : snapshot) {
                               routine(
                                   h,
                                   ServiceRecord.add(r),
-                                  "Add " + r.date + " / " + r.mileage + " km");
+                                  "Add " + r.date + " / " + r.mileage + " km",
+                                  profile);
                               Thread.sleep(100);
                             }
                             if (re) {
@@ -1116,12 +1390,11 @@ public final class MainActivity extends Activity {
     }
   }
 
-  void routine(Hsfz h, byte[] request, String title) throws Exception {
+  void routine(Hsfz h, byte[] request, String title, String profile) throws Exception {
     append(title + " TX " + ServiceRecord.hex(request));
     byte[] r = h.request(0x63, request);
     append(title + " RX " + ServiceRecord.hex(r));
-    if (r.length >= 5 && r[4] != 0 && r[4] != 1)
-      throw new IOException("Routine refused with status " + (r[4] & 255));
+    HeadUnitProtocol.requireSuccess(r, profile);
   }
 
   void readCbs() {
@@ -1193,6 +1466,10 @@ public final class MainActivity extends Activity {
   void resetCbs(Cbs c) {
     if (!available()) return;
     try {
+      if (HeadUnitProtocol.isMgu(family.getSelectedItem().toString()))
+        throw new IOException(
+            "CBS resets on MGU-equipped vehicles remain disabled pending cluster validation. MGU"
+                + " mode currently supports head-unit history operations only.");
       Target t = mutationTarget();
       String id = identified;
       if (!id.equals(cbsTarget))
@@ -1289,7 +1566,11 @@ public final class MainActivity extends Activity {
           Updater.prefs(this).edit().putBoolean("automatic", value).apply();
           Updater.schedule(this);
         });
-    updates = label(Updater.prefs(this).getString("status", "Version " + BuildConfig.VERSION_NAME + " · no update check yet"));
+    updates =
+        label(
+            Updater.prefs(this)
+                .getString(
+                    "status", "Version " + BuildConfig.VERSION_NAME + " · no update check yet"));
     button("Check for updates", false, () -> checkUpdate(true));
     button("Review available update", true, () -> reviewUpdate());
     button(
@@ -1303,14 +1584,17 @@ public final class MainActivity extends Activity {
             + " native HSFZ discovery, identity, CBS read, CBS reset and history write.");
     label(
         "Requires vehicle validation: Android network routing, ECU acceptance, model coverage and"
-            + " CBS ownership. MGU / iDrive 7–8 changes are disabled. No history read-back,"
-            + " rooting, firmware flashing or cloud service-book changes.");
+            + " CBS ownership. MGU history changes require explicit experimental opt-in and a"
+            + " scoped head-unit identity read; MGU CBS resets remain disabled. No history"
+            + " read-back, rooting, firmware flashing or cloud service-book changes.");
     label(
         "Not ported: Stampbook QR transfer, 3D drive replay and experimental DID probes. Use"
             + " upstream desktop BMW Service Manager for these features.");
     card(p, "Licenses & credits");
     label(
-        "BMW Service History Manager · " + BuildConfig.VERSION_NAME + "\n"
+        "BMW Service History Manager · "
+            + BuildConfig.VERSION_NAME
+            + "\n"
             + "Android adaptation for statist1c.\n"
             + "Based on devttys1/bmw-service-manager.\n"
             + "Required Notice: Copyright 2026 devttys1"

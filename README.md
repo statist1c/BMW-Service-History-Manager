@@ -2,7 +2,7 @@
 
 Native Android adaptation of [devttys1/bmw-service-manager](https://github.com/devttys1/bmw-service-manager), with the rounded cards, line icons, bottom navigation, and light/dark/system themes used by the user's MGU companion apps.
 
-**Version:** 0.1.1 · Android 8.0+ · universal APK, no bundled native libraries. Independent project; no BMW affiliation. Vehicle operations are experimental and have **not** been validated on a BMW from Android.
+**Version:** 0.2.0 · Android 8.0+ · universal APK, no bundled native libraries. Independent project; no BMW affiliation. Vehicle operations, including MGU history support, are experimental and have **not** been validated on a BMW from Android.
 
 ## Install
 
@@ -22,12 +22,18 @@ Install the signed `BMW-Service-Manager.apk` supplied with this project. Android
 | CBS read from cluster slots 0x4101–0x417F | Experimental native HSFZ transport |
 | Service-history write / optional erase and restart | Experimental; explicit supported-family selection, identity check, backup acknowledgement, preview and two confirmations required |
 | CBS reset | Experimental; completed-service confirmation, identity and supported-family selection required |
-| MGU / iDrive 7–8 history writes or CBS resets | Disabled for Unknown/MGU selection; upstream does not establish MGU compatibility |
+| Write selected record | Adds one previewed record, never erases existing history; duplicate entries remain possible |
+| Standalone head-unit restart / erase history | Implemented with identity checks and two confirmations; erase requires backup acknowledgement |
+| Calendar date picker | Implemented alongside manual ISO date entry |
+| EDIABAS argument editor | Add/edit/copy validated arguments locally; does not execute arbitrary jobs |
+| Head-unit identification | Reads seven standard identification DIDs from address 0x63; displays available text/raw data |
+| MGU service-history add / erase / restart | Experimental profile based on inspected diagnostic definitions; explicit MGU acknowledgement and a scoped head-unit identification read required |
+| CBS reset on MGU-equipped vehicles | Disabled pending separate cluster validation; read-only CBS remains experimental |
 | Read back existing head-unit service history | Not supported by the known upstream protocol |
 | Cloud/digital BMW service-book updates | Not supported |
 | QR/Stampbook transfer, 3D drive replay, DID probe tools | Not ported; use upstream desktop app |
 
-Upstream lists **CIC, NBT, NBT Evo, ENTRY and CHAMP2**, with development/testing on an **F48 X1 with NBT Evo**. Similar styling to an MGU app does not imply MGU protocol compatibility. The head-unit family is a user declaration, not automatic hardware detection. Read-only diagnostics can also be refused by unsupported cars.
+Upstream lists **CIC, NBT, NBT Evo, ENTRY and CHAMP2**, with development/testing on an **F48 X1 with NBT Evo**. This Android adaptation adds an experimental **MGU** profile, with evidence and limits in [docs/MGU-SUPPORT.md](docs/MGU-SUPPORT.md). The head-unit family is a user declaration, not automatic hardware detection. Read-only diagnostics can also be refused by unsupported cars. Unknown-family mutations stay disabled.
 
 ## Use offline
 
@@ -36,7 +42,7 @@ Upstream lists **CIC, NBT, NBT Evo, ENTRY and CHAMP2**, with development/testing
 3. Sort or reorder as needed. Export JSON before important changes.
 4. In **Vehicle**, choose whether a write plan would erase history or restart the head unit, then preview the exact requests. Preview sends nothing.
 
-Dates are ISO `YYYY-MM-DD`; mileage is kilometres. Dealer numbers are up to seven printable ASCII characters; leading zeroes are retained. Maximum 2,000 records / 4 MiB input file. This preview is English-only. The TST importer's erase flag is intentionally **not** enabled automatically. No sample vehicle data is inserted.
+Dates are ISO `YYYY-MM-DD` with a native calendar picker; mileage is kilometres. Dealer numbers are up to seven printable ASCII characters; leading zeroes are retained. Maximum 2,000 records / 4 MiB input file. The app is English-only. The TST importer's erase flag is intentionally **not** enabled automatically. No sample vehicle data is inserted. Per-record controls provide a selected-record preview/write and a validated EDIABAS argument editor. Raw arguments change only local records until explicitly previewed and confirmed for writing.
 
 ## Connect to a vehicle
 
@@ -44,7 +50,7 @@ Use an ENET cable and a compatible USB-C Ethernet adapter, or an ENET Wi-Fi adap
 
 Enter the actual gateway IPv4 address and HSFZ port (normally 6801), or use discovery. The suggested `169.254.199.99` is only a starting value, not an assumed vehicle address. The MGU SSH IP from other companion apps is not necessarily the diagnostic gateway. Check the vehicle identity and VIN. Discovery selects the first response; verify it before proceeding.
 
-For mutations: select the actual upstream-supported head-unit family, enable experimental changes for that session, and match the workspace VIN if one is set. History writes additionally require the backup acknowledgement and an exact preview of the current records/options. The app rechecks the gateway identity immediately before sending changes.
+For mutations: select the actual head-unit family, enable experimental changes for that session, and match the workspace VIN if one is set. For MGU, acknowledge experimental support, check vehicle identity, then read head-unit identification on that same connection; at least one identifier must be returned. This is a responsiveness check, not automatic proof of the model or write permissions. History writes additionally require the backup acknowledgement and an exact preview of the current records/options. The app rechecks the gateway identity immediately before sending changes. Standalone restart and erase send no add-record requests; standalone erase requires the backup acknowledgement. MGU CBS resets stay disabled.
 
 Only work while parked, ignition on, with stable vehicle battery power. Head-unit history cannot be read back or backed up by this app: photograph it in iDrive first. Erase is permanent. Writes stop on the first transport/ECU/routine failure and are never automatically retried or rolled back. A failure can leave partial changes. The app checks response service/echo and routine result, but only inspection in iDrive/cluster confirms the actual vehicle outcome.
 
@@ -74,8 +80,9 @@ On Windows, use `gradlew.bat` instead of `bash gradlew`. Debug APK: `app/build/o
 For standalone core checks, use JDK 17:
 
 ```text
-javac -d work/test-classes app/src/main/java/dev/mgu/service/ServiceRecord.java app/src/main/java/dev/mgu/service/Hsfz.java app/src/main/java/dev/mgu/service/Cbs.java tests/CoreTest.java
+javac -d work/test-classes app/src/main/java/dev/mgu/service/ServiceRecord.java app/src/main/java/dev/mgu/service/Hsfz.java app/src/main/java/dev/mgu/service/Cbs.java app/src/main/java/dev/mgu/service/HeadUnitInfo.java app/src/main/java/dev/mgu/service/HeadUnitProtocol.java tests/CoreTest.java tests/FeatureTest.java
 java -cp work/test-classes dev.mgu.service.CoreTest
+java -cp work/test-classes dev.mgu.service.FeatureTest
 ```
 
 The platform-only instrumentation runner is `dev.mgu.service.AppSmokeTest`; run on a dedicated test emulator. It creates and clears this app's local test records. The optional updater-validation test fixtures are documented in `docs/VALIDATION.md`.

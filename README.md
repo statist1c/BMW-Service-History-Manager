@@ -2,11 +2,11 @@
 
 Native Android adaptation of [devttys1/bmw-service-manager](https://github.com/devttys1/bmw-service-manager), with the rounded cards, line icons, bottom navigation, and light/dark/system themes used by the user's MGU companion apps.
 
-**Version:** 0.2.0 · Android 8.0+ · universal APK, no bundled native libraries. Independent project; no BMW affiliation. Vehicle operations, including MGU history support, are experimental and have **not** been validated on a BMW from Android.
+**Version:** 0.2.1 · Android 8.0+ · universal APK, no bundled native libraries. Independent project; no BMW affiliation. Vehicle operations, including MGU history support, are experimental and have **not** been validated on a BMW from Android.
 
 ## Install
 
-Install the signed `BMW-Service-Manager.apk` supplied with this project. Android may ask you to allow installation from the app used to open the file. No root is required on the phone.
+Install the signed `BMW-Service-Manager-v0.2.1.apk` supplied with this project. Android may ask you to allow installation from the app used to open the file. No root is required on the phone.
 
 ## Features
 

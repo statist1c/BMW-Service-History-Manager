@@ -1,4 +1,14 @@
-# Validation record — 15 November 2026
+# Validation record — updated 16 November 2026
+
+## v0.4.0
+
+Passed: **40 core + 50 feature + 35 v0.4.0 core checks**, **36 Android storage/failure checks**, and **51 full Android/UI checks** (including the live GitHub and dark-theme screenshot options). The signed-release migration check additionally passed four assertions after a one-check v0.3.0 fixture seed. Debug/release assembly, test APK assembly, `lintDebug` and `lintRelease` passed. Release lint has zero errors; remaining warnings concern localization, legacy UI APIs and drawing allocations.
+
+New checks exercise signed distance extrema/negative multiples and legacy unsigned conversion, future/duplicate/custom-code write guards, exact F150 family matching, F101 software changes over a local TCP double, per-VIN isolation, migration preserving the original file, atomic storage and JSON identity checks, durable intent before sends, timeouts, crash-pending sends, malformed routine replies, partial completion, duplicate guards after edits/reloads and disk failure preventing any send. CIC status 0/1 handling was corrected using the locally inspected diagnostic description; earlier historical descriptions below predate that correction.
+
+On an Android 15 emulator, a release-signed v0.3.0 installation was seeded with a real legacy history file containing a VIN, record and unsigned distance value. The same-key v0.4.0 APK installed over it without uninstalling; the VIN/record migrated, distance retained its four bytes as signed -1, and SHA-256 confirmed the original file remained unchanged. Certificate SHA-256 remains `9f9cc9906c59b39791b443f7b5727fe48ea24e50da7bed8aa54b3bb48b3fa173`. The migrated release UI was visually inspected.
+
+Storage checks use isolated emulator directories. Run the standard instrumentation with `-e focus storage` for the additional journal/workspace cases. The normal runner creates and clears app test records; use a dedicated emulator. `-e migration seed` is only for a release-signed test runner targeting the old v0.3.0 fixture; `-e migration check` verifies the upgraded fixture. Proprietary PRGs, disassembly, keys and APK fixtures are excluded from source delivery. No BMW vehicle was contacted. This is not real-vehicle acceptance or history read-back verification.
 
 ## 0.2.0 feature and MGU update
 

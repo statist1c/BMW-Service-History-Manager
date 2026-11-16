@@ -118,7 +118,7 @@ public final class CoreTest {
     r.dealer = "181";
     eq(ServiceRecord.hex(Arrays.copyOfRange(r.encode(), 10, 17)), "31 38 31 00 00 00 00");
     r.mileage = 0xffffffffL;
-    r.items.get(0).distance = 0xffffffffL;
+    r.items.get(0).distance = -1;
     r.items.get(0).months = 65535;
     eq(ServiceRecord.hex(Arrays.copyOfRange(r.encode(), 21, 27)), "ff ff ff ff ff ff");
     r.dealer = "12345678";
@@ -129,7 +129,7 @@ public final class CoreTest {
     r.status = 4;
     reject(r::validate);
     r.status = 1;
-    r.items.get(0).distance = -1;
+    r.items.get(0).distance = (long)Integer.MIN_VALUE - 1;
     reject(r::validate);
     r.items.get(0).distance = 0;
     r.items.clear();

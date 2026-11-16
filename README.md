@@ -2,18 +2,18 @@
 
 Native Android app for creating, editing and organising BMW service history, with JSON and Toolset32 TST import/export, modern themes, and experimental ENET vehicle connectivity.
 
-**Version:** 0.3.0 · Android 8.0+ · universal APK, no bundled native libraries. Independent project; no BMW affiliation. Vehicle operations, including MGU history support, are experimental and have **not** been validated on a BMW from Android.
+**Version:** 0.4.0 · Android 8.0+ · universal APK, no bundled native libraries. Independent project; no BMW affiliation. Vehicle operations, including MGU history support, are experimental and have **not** been validated on a BMW from Android.
 
 ## Install
 
-Install the signed `BMW-Service-Manager-v0.3.0.apk` supplied with this project. Android may ask you to allow installation from the app used to open the file. No root is required on the phone.
+Install the signed `BMW-Service-Manager-v0.4.0.apk` supplied with this project. Android may ask you to allow installation from the app used to open the file. No root is required on the phone.
 
 ## Features
 
 | Feature | Status in this Android version |
 | --- | --- |
 | Create/edit/delete genuine service records | Implemented locally |
-| 1–13 items per record, statuses, unsigned distance/time, correction counter, dealer number | Implemented; matches upstream wire layout |
+| 1–13 items per record, statuses, signed remaining distance and unsigned time, correction counter, dealer number | Implemented; matches upstream wire layout |
 | Mileage sorting and move up/down ordering | Implemented |
 | Upstream/Stampbook JSON and Toolset32 TST import/export | Implemented; import replaces the local workspace only after confirmation |
 | Local autosave and Android file picker exports | Implemented; private storage, backup/transfer disabled |
@@ -26,14 +26,14 @@ Install the signed `BMW-Service-Manager-v0.3.0.apk` supplied with this project. 
 | Standalone head-unit restart / erase history | Implemented with identity checks and two confirmations; erase requires backup acknowledgement |
 | Calendar date picker | Implemented alongside manual ISO date entry |
 | EDIABAS argument editor | Add/edit/copy validated arguments locally; does not execute arbitrary jobs |
-| Head-unit identification | Reads seven standard identification DIDs from address 0x63; displays available text/raw data |
+| Head-unit identification | Reads nine identity DIDs, including BMW F150 variant and F101 software fingerprint; rechecks both before history mutations |
 | MGU service-history add / erase / restart | Experimental profile based on inspected diagnostic definitions; explicit MGU acknowledgement and a scoped head-unit identification read required |
 | CBS reset on MGU-equipped vehicles | Disabled pending separate cluster validation; read-only CBS remains experimental |
 | Read back existing head-unit service history | Not supported by the known upstream protocol |
 | Cloud/digital BMW service-book updates | Not supported |
 | QR/Stampbook transfer, 3D drive replay, DID probe tools | Not ported; use upstream desktop app |
 
-Upstream lists **CIC, NBT, NBT Evo, ENTRY and CHAMP2**, with development/testing on an **F48 X1 with NBT Evo**. This Android adaptation adds an experimental **MGU** profile, with evidence and limits in [docs/MGU-SUPPORT.md](docs/MGU-SUPPORT.md). The head-unit family is a user declaration, not automatic hardware detection. Read-only diagnostics can also be refused by unsupported cars. Unknown-family mutations stay disabled.
+Upstream lists **CIC, NBT, NBT Evo, ENTRY and CHAMP2**, with development/testing on an **F48 X1 with NBT Evo**. This Android adaptation adds an experimental **MGU** profile, with evidence and limits in [docs/MGU-SUPPORT.md](docs/MGU-SUPPORT.md). The selected head-unit family must match a recognized F150 diagnostic variant, with an F101 fingerprint scoped to this connection. Unknown variants remain read only. Read-only diagnostics can also be refused by unsupported cars. Unknown-family mutations stay disabled.
 
 ## Use offline
 
@@ -80,9 +80,10 @@ On Windows, use `gradlew.bat` instead of `bash gradlew`. Debug APK: `app/build/o
 For standalone core checks, use JDK 17:
 
 ```text
-javac -d work/test-classes app/src/main/java/dev/mgu/service/ServiceRecord.java app/src/main/java/dev/mgu/service/Hsfz.java app/src/main/java/dev/mgu/service/Cbs.java app/src/main/java/dev/mgu/service/HeadUnitInfo.java app/src/main/java/dev/mgu/service/HeadUnitProtocol.java tests/CoreTest.java tests/FeatureTest.java
+javac -d work/test-classes app/src/main/java/dev/mgu/service/ServiceRecord.java app/src/main/java/dev/mgu/service/Hsfz.java app/src/main/java/dev/mgu/service/Cbs.java app/src/main/java/dev/mgu/service/HeadUnitInfo.java app/src/main/java/dev/mgu/service/HeadUnitProtocol.java app/src/main/java/dev/mgu/service/RecordChecks.java tests/CoreTest.java tests/FeatureTest.java tests/V040CoreTest.java
 java -cp work/test-classes dev.mgu.service.CoreTest
 java -cp work/test-classes dev.mgu.service.FeatureTest
+java -cp work/test-classes dev.mgu.service.V040CoreTest
 ```
 
 The platform-only instrumentation runner is `dev.mgu.service.AppSmokeTest`; run on a dedicated test emulator. It creates and clears this app's local test records. The optional updater-validation test fixtures are documented in `docs/VALIDATION.md`.
@@ -98,3 +99,13 @@ Distribute [LICENSE.md](LICENSE.md) and [NOTICE.md](NOTICE.md) with the source a
 ## Editor improvements in v0.2.2
 
 Change existing service-item types, including custom codes; move items up/down; insert records or items at the top or bottom. Save back to an imported TST with an overwrite confirmation, or export a new file when the document provider does not allow writing. Importing JSON clears the previous TST save destination. These are independently implemented editor conveniences; no code from theDeniZ/ServiceManager is bundled.
+
+## v0.4.0 workspaces and write evidence
+
+Use **Vehicle workspaces** to open a VIN or return to offline editing. Each VIN has separate records and a separate opened-TST destination. The previous history is migrated without deleting the original file. Copy current records into a new VIN workspace explicitly; a VIN-bound workspace is required for history changes. Switching workspaces invalidates vehicle/head-unit checks.
+
+**Check local history** finds future dates, duplicate dates and unsupported custom item codes. Offline editing/import retains custom types; these conflicts block vehicle writes. Remaining distance is signed 32-bit, including negative overdue values. Legacy unsigned distance values are interpreted as the same two's-complement bit pattern when importing.
+
+Monitor provides **View persistent write journals** and **Export write journals**. Journals contain the local snapshot, VIN, head-unit variant/software fingerprint, frozen requests and step outcomes. Intent is synced to storage before sending. A pending send after interruption is uncertain. Accepted/uncertain appends are blocked by VIN plus draft ID, date or payload fingerprint; editing or reloading a draft does not authorize a retry. Explicit replacement remains destructive and requires separate confirmations. There is no automatic replay or rollback. Keep exported journals private: they contain vehicle identifiers. Journals are local evidence, not a backup or read-back of the vehicle history. Reports are size limited; stored journal files are retained.
+
+The new storage, journaling and local checks are independently implemented. No application code, databases, native interpreter, proprietary PRG files or assets from lennoncarvalho/bmw-self-service are included. See [v0.4.0 protocol notes](docs/V040-NOTES.md) for evidence and limitations.

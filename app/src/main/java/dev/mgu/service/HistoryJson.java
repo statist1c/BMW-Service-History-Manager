@@ -21,6 +21,7 @@ final class HistoryJson {
     JSONObject j =
         new JSONObject()
             .put("date", r.date.toString())
+            .put("local_id", r.localId)
             .put("mileage_km", r.mileage)
             .put("bmw_dealer", r.bmw)
             .put("dealer_number", r.dealer)
@@ -39,6 +40,10 @@ final class HistoryJson {
 
   static ServiceRecord record(JSONObject j) throws JSONException {
     ServiceRecord r = new ServiceRecord();
+    String localId = j.optString("local_id", "");
+    if (localId.matches(
+        "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))
+      r.localId = UUID.fromString(localId).toString();
     r.date = LocalDate.parse(j.getString("date"));
     r.mileage = integer(j, "mileage_km", -1);
     r.bmw = j.optBoolean("bmw_dealer", false);
@@ -50,7 +55,7 @@ final class HistoryJson {
       JSONObject o = a.getJSONObject(n);
       ServiceRecord.Item i = new ServiceRecord.Item(small(o, "code", -1));
       i.status = small(o, "status", 1);
-      i.distance = integer(o, "remaining_distance", 0);
+      i.distance = ServiceRecord.signedDistance(integer(o, "remaining_distance", 0));
       i.months = small(o, "remaining_time", 0);
       r.items.add(i);
     }

@@ -53,6 +53,14 @@ public class AppSmokeTest extends Instrumentation {
   }
 
   public void onStart() {
+    if (args != null && args.containsKey("migration")) {
+      migrationCheck(args.getString("migration"));
+      return;
+    }
+    if (args != null && "storage".equals(args.getString("focus"))) {
+      new V040Checks(this).run();
+      return;
+    }
     Bundle result = new Bundle();
     try {
       ServiceRecord r = CoreFixture.record();
@@ -228,6 +236,7 @@ public class AppSmokeTest extends Instrumentation {
       click("Save");
       ui(() -> ok(app.records.size() == 1, "Save record through native dialog"));
       editorChecks();
+      workspaceChecks();
       if (args != null && "true".equals(args.getString("upgrade"))) updateFlowChecks();
       ui(
           () -> {
@@ -335,7 +344,7 @@ public class AppSmokeTest extends Instrumentation {
             app.save();
           });
       node("Appearance");
-      ok(new java.io.File(app.getFilesDir(), "history.json").exists(), "History persisted");
+      ok(app.workspaces.file(app.workspaceKey).exists(), "History persisted in selected workspace");
       ui(
           () -> {
             app.records.clear();
@@ -377,6 +386,82 @@ public class AppSmokeTest extends Instrumentation {
 
   interface Checked {
     void run() throws Exception;
+  }
+
+  void migrationCheck(String mode) {
+    Bundle result = new Bundle();
+    try {
+      getTargetContext()
+          .getSharedPreferences("updates", 0)
+          .edit()
+          .putBoolean("automatic", false)
+          .commit();
+      app =
+          (MainActivity)
+              startActivitySync(
+                  new Intent(getTargetContext(), MainActivity.class)
+                      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+      waitForIdleSync();
+      java.io.File legacy = new java.io.File(app.getFilesDir(), "history.json");
+      if (mode.equals("seed")) {
+        if (!app.getPackageManager()
+            .getPackageInfo(app.getPackageName(), 0)
+            .versionName
+            .equals("0.3.0"))
+          throw new IllegalStateException("Seed mode requires the old v0.3.0 fixture");
+        ui(
+            () -> {
+              app.records.clear();
+              ServiceRecord record = CoreFixture.record();
+              record.items.get(0).distance = 4294967295L;
+              app.records.add(record);
+              app.vinInput.setText("WBA12345678901234");
+              app.changed();
+              app.finish();
+            });
+        String hash =
+            java.util.Base64.getEncoder()
+                .encodeToString(
+                    java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(java.nio.file.Files.readAllBytes(legacy.toPath())));
+        getTargetContext()
+            .getSharedPreferences("migration-fixture", 0)
+            .edit()
+            .putString("hash", hash)
+            .commit();
+        ok(legacy.exists(), "Seed old release with legacy history");
+      } else {
+        ui(
+            () -> {
+              ok(
+                  app.workspaceKey.equals("WBA12345678901234"),
+                  "Upgrade selects the migrated VIN workspace");
+              ok(
+                  app.records.size() == 1 && app.records.get(0).mileage == 85000,
+                  "Upgrade preserves legacy records");
+              ok(
+                  app.records.get(0).items.get(0).distance == -1,
+                  "Upgrade preserves legacy distance bits");
+            });
+        String hash =
+            java.util.Base64.getEncoder()
+                .encodeToString(
+                    java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(java.nio.file.Files.readAllBytes(legacy.toPath())));
+        ok(
+            hash.equals(
+                getTargetContext()
+                    .getSharedPreferences("migration-fixture", 0)
+                    .getString("hash", "")),
+            "Signed upgrade leaves the original history file byte-for-byte unchanged");
+      }
+      result.putString(
+          "stream", "PASS: " + checks + " signed-release migration checks (" + mode + ")\n");
+      finish(Activity.RESULT_OK, result);
+    } catch (Throwable e) {
+      result.putString("stream", "FAIL: " + e + "\n" + android.util.Log.getStackTraceString(e));
+      finish(0, result);
+    }
   }
 
   void deniedTarget(String message) throws Exception {
@@ -481,7 +566,7 @@ public class AppSmokeTest extends Instrumentation {
           app.erase.setChecked(false);
           app.prefs()
               .edit()
-              .putString("opened_tst", android.net.Uri.fromFile(file).toString())
+              .putString(app.openedTstKey(), android.net.Uri.fromFile(file).toString())
               .apply();
           app.saveOpenedTst();
         });
@@ -500,13 +585,13 @@ public class AppSmokeTest extends Instrumentation {
         saved.equals(ServiceRecord.tst(app.records, false)),
         "Save back truncates and writes exact TST");
     ok(ServiceRecord.parseTst(saved).records.size() == 1, "Saved TST imports successfully");
-    ui(() -> app.prefs().edit().remove("opened_tst").apply());
+    ui(() -> app.prefs().edit().remove(app.openedTstKey()).apply());
   }
 
   void updateFlowChecks() throws Exception {
     java.io.File next = new java.io.File(app.getFilesDir(), "update-flow.apk");
     Updater.Release release =
-        new Updater.Release(metadata(next, "v0.3.1").json().put("preview", true));
+        new Updater.Release(metadata(next, "v0.4.1").json().put("preview", true));
     Updater.validate(app, next, release);
     ok(true, "Validate newer same-signer preview APK");
     java.nio.file.Files.copy(
@@ -526,7 +611,7 @@ public class AppSmokeTest extends Instrumentation {
           app.select(3);
           app.reviewUpdate();
         });
-    node("Update to v0.3.1?");
+    node("Update to v0.4.1?");
     click("Continue");
     node("Install verified update?");
     click("Continue");
@@ -534,6 +619,49 @@ public class AppSmokeTest extends Instrumentation {
     ok(true, "In-app verified preview opens Android update installer without redownload");
     click("Cancel");
     Updater.prefs(app).edit().remove("release").apply();
+  }
+
+  void workspaceChecks() throws Exception {
+    final String originalKey = app.workspaceKey;
+    final String first = "WBA12345678901234", second = "WBA12345678901235";
+    final int originalCount = app.records.size();
+    ui(
+        () -> {
+          try {
+            app.switchWorkspace(first, true);
+            ok(
+                app.records.size() == originalCount
+                    && app.vinInput.getText().toString().equals(first),
+                "Copy records into a VIN workspace");
+            app.headUnitIdentity = "fixture";
+            app.headUnitDetails = new HeadUnitInfo.Result("", 2, "0F25B0", new byte[] {1});
+            app.workspaces.save(second, Collections.emptyList());
+            app.switchWorkspace(second, false);
+            ok(app.records.isEmpty(), "Another VIN starts with a separate history");
+            ok(
+                app.headUnitDetails == null && app.headUnitIdentity.isEmpty(),
+                "Workspace switch invalidates head-unit identity");
+            app.records.add(CoreFixture.record());
+            app.changed();
+            app.switchWorkspace(first, false);
+            ok(app.records.size() == originalCount, "Switching VIN restores its saved history");
+            app.identified = "fixture · " + first;
+            app.headUnitIdentity = app.identified;
+            app.headUnitDetails = new HeadUnitInfo.Result("", 2, "0F25B0", new byte[] {1});
+            app.requireExactHeadUnit("MGU · experimental");
+            ok(true, "Matching exact identity accepted in bound VIN workspace");
+            boolean blocked = false;
+            try {
+              app.requireExactHeadUnit("NBT");
+            } catch (Exception expected) {
+              blocked = true;
+            }
+            ok(blocked, "Wrong manual family cannot override variant mapping");
+            app.switchWorkspace(originalKey, false);
+          } catch (Exception e) {
+            throw new AssertionError(e);
+          }
+        });
   }
 
   void setDescriptionText(String desc, String value) throws Exception {

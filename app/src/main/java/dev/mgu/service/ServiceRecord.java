@@ -25,6 +25,7 @@ public final class ServiceRecord {
   };
   public LocalDate date = LocalDate.now();
   public long mileage;
+  public String localId = UUID.randomUUID().toString();
   public boolean bmw;
   public String dealer = "";
   public int status = 1, correction;
@@ -49,6 +50,10 @@ public final class ServiceRecord {
   }
 
   public void validate() {
+    if (localId == null
+        || !localId.matches(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))
+      throw new IllegalArgumentException("Invalid local draft identity");
     if (date == null || date.getYear() < 1 || date.getYear() > 65535)
       throw new IllegalArgumentException("Invalid date");
     range(mileage, 0xffffffffL, "Mileage");
@@ -62,7 +67,8 @@ public final class ServiceRecord {
       range(i.code, 255, "Item code");
       if (i.status < 1 || i.status > 3)
         throw new IllegalArgumentException("Item status must be 1–3");
-      range(i.distance, 0xffffffffL, "Remaining distance");
+      if (i.distance < Integer.MIN_VALUE || i.distance > Integer.MAX_VALUE)
+        throw new IllegalArgumentException("Remaining distance must fit a signed 32-bit value");
       range(i.months, 65535, "Remaining months");
     }
   }
@@ -154,7 +160,7 @@ public final class ServiceRecord {
       if (b >= p.length) throw new IllegalArgumentException("Truncated TST item");
       Item it = new Item(Math.toIntExact(number(p[b])));
       if (b + 1 < p.length) it.status = Math.toIntExact(number(p[b + 1]));
-      if (b + 2 < p.length) it.distance = number(p[b + 2]);
+      if (b + 2 < p.length) it.distance = signedDistance(number(p[b + 2]));
       if (b + 3 < p.length) it.months = Math.toIntExact(number(p[b + 3]));
       r.items.add(it);
     }
@@ -179,6 +185,11 @@ public final class ServiceRecord {
     if (dealerFlag != 0 && dealerFlag != 1)
       throw new IllegalArgumentException("BMW-dealer flag must be 0 or 1");
     return fromArgs(args);
+  }
+
+  public static long signedDistance(long value) {
+    if (value >= 0x80000000L && value <= 0xffffffffL) return (int) value;
+    return value;
   }
 
   public static final class Imported {

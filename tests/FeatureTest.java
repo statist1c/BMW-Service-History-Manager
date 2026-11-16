@@ -52,8 +52,15 @@ public final class FeatureTest {
       memoryRejected = e.getMessage().contains("memory");
     }
     check(memoryRejected, "MGU memory-error result must stop a write");
-    HeadUnitProtocol.requireSuccess(new byte[] {0x71, 1, (byte) 0xa0, (byte) 0x81, 1}, "CIC");
-    check(true, "CIC uses result one for success");
+    HeadUnitProtocol.requireSuccess(new byte[] {0x71, 1, (byte) 0xa0, (byte) 0x81, 0}, "CIC");
+    check(true, "Inspected CIC description uses result zero for success");
+    boolean cicMemoryRejected = false;
+    try {
+      HeadUnitProtocol.requireSuccess(new byte[] {0x71, 1, (byte) 0xa0, (byte) 0x81, 1}, "CIC");
+    } catch (IOException e) {
+      cicMemoryRejected = e.getMessage().contains("memory");
+    }
+    check(cicMemoryRejected, "CIC memory error must not be accepted as success");
     boolean shortRejected = false;
     try {
       HeadUnitProtocol.requireSuccess(
@@ -67,7 +74,7 @@ public final class FeatureTest {
     try {
       HeadUnitProtocol.validateForProfile(
           java.util.Collections.singletonList(record), "MGU · experimental");
-    } catch (IOException e) {
+    } catch (IOException | IllegalArgumentException e) {
       rangeRejected = true;
     }
     check(rangeRejected, "MGU signed-distance limit enforced");
@@ -93,8 +100,13 @@ public final class FeatureTest {
                     int did = ((p[3] & 255) << 8) | (p[4] & 255);
                     check(did == HeadUnitInfo.DIDS[n], "Expected DID order");
                     byte[] r;
-                    if (n == 0) {
-                      byte[] text = "HU_NBT2".getBytes(StandardCharsets.US_ASCII);
+                    if (n <= 2) {
+                      byte[] text =
+                          n == 0
+                              ? new byte[] {0x0f, 0x25, (byte) 0xb0}
+                              : n == 1
+                                  ? new byte[] {1, 2, 3}
+                                  : "HU_NBT2".getBytes(StandardCharsets.US_ASCII);
                       r = new byte[text.length + 5];
                       r[0] = 99;
                       r[1] = (byte) 244;
@@ -116,16 +128,71 @@ public final class FeatureTest {
         String result = HeadUnitInfo.read(h, line -> {});
         check(result.contains("HU_NBT2"), "Returned head-unit identity displayed");
         check(
-            result.contains("Returned identifiers: 1 / 7"),
+            result.contains("Returned identifiers: 3 / 9"),
             "Unsupported DIDs handled individually");
-        check(result.contains("does not automatically"), "No compatibility inferred");
+        check(result.contains("not proof"), "No vehicle validation inferred");
       }
       fake.get(5, TimeUnit.SECONDS);
       worker.shutdownNow();
     }
+    recheck(false);
+    recheck(true);
     System.out.println(
         "PASS: "
             + checks
             + " feature checks (strict arguments, read-only head-unit identification).");
+  }
+
+  static void recheck(boolean changed) throws Exception {
+    try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      ExecutorService worker = Executors.newSingleThreadExecutor();
+      Future<?> fake =
+          worker.submit(
+              () -> {
+                try (Socket socket = server.accept()) {
+                  DataInputStream in = new DataInputStream(socket.getInputStream());
+                  DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                  for (int n = 0; n < 2; n++) {
+                    int size = in.readInt();
+                    in.readUnsignedShort();
+                    byte[] request = new byte[size];
+                    in.readFully(request);
+                    check(
+                        request[2] == 0x22
+                            && request[3] == (byte) 0xf1
+                            && request[4] == (n == 0 ? 0x50 : 1),
+                        "Recheck sends only exact identity reads");
+                    byte[] value =
+                        n == 0
+                            ? new byte[] {0x0f, 0x25, (byte) 0xb0}
+                            : new byte[] {1, 2, (byte) (changed ? 4 : 3)};
+                    byte[] response = new byte[value.length + 5];
+                    response[0] = 99;
+                    response[1] = (byte) 244;
+                    response[2] = 0x62;
+                    response[3] = request[3];
+                    response[4] = request[4];
+                    System.arraycopy(value, 0, response, 5, value.length);
+                    out.writeInt(response.length);
+                    out.writeShort(1);
+                    out.write(response);
+                    out.flush();
+                  }
+                } catch (Exception e) {
+                  throw new RuntimeException(e);
+                }
+              });
+      boolean failed = false;
+      try (Hsfz h = new Hsfz(new Socket(), "127.0.0.1", server.getLocalPort())) {
+        try {
+          HeadUnitInfo.recheck(h, new HeadUnitInfo.Result("", 2, "0F25B0", new byte[] {1, 2, 3}));
+        } catch (IOException e) {
+          failed = true;
+        }
+      }
+      check(failed == changed, "Software changes invalidate the prepared identity");
+      fake.get(5, TimeUnit.SECONDS);
+      worker.shutdownNow();
+    }
   }
 }

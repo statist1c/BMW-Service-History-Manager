@@ -3,7 +3,7 @@ package dev.mgu.service;
 import java.io.IOException;
 import java.util.Locale;
 
-/** MGU/NBT result 1 is a memory error, not a successful history write. */
+/** Inspected head-unit descriptions use zero for success and one for memory failure. */
 public final class HeadUnitProtocol {
   public static void validateForProfile(java.util.List<ServiceRecord> records, String profile)
       throws IOException {
@@ -26,12 +26,11 @@ public final class HeadUnitProtocol {
     if (response.length < 5)
       throw new IOException("Routine response has no result status; outcome is unverified");
     int status = response[4] & 255;
-    boolean cic = profile.equals("CIC");
-    if (status == (cic ? 1 : 0)) return;
+    if (status == 0) return;
     String meaning =
-        status == (cic ? 2 : 1)
+        status == 1
             ? "Out of memory / no free space"
-            : status == (cic ? 3 : 2)
+            : status == 2
                 ? "Data inconsistency"
                 : status == 4
                     ? "No writing permission"

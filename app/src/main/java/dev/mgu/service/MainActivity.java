@@ -44,6 +44,9 @@ public final class MainActivity extends Activity {
   Spinner route, family;
   CheckBox erase, reset, experimental, backup, mguConsent;
   String operationState = "Offline workspace · vehicle not checked";
+  WorkspaceStore workspaces;
+  String workspaceKey = "offline";
+  HeadUnitInfo.Result headUnitDetails;
 
   SharedPreferences prefs() {
     return getSharedPreferences("settings", 0);
@@ -69,17 +72,11 @@ public final class MainActivity extends Activity {
     ON = dark ? 0xff10254b : Color.WHITE;
     AMBER = dark ? 0xffffd68c : 0xff8b5700;
     try {
-      File f = new File(getFilesDir(), "history.json");
-      if (f.exists() || new File(f.getPath() + ".bak").exists()) {
-        Object j =
-            new JSONTokener(
-                    new String(
-                        Updater.read(new android.util.AtomicFile(f).openRead(), 4 * 1024 * 1024),
-                        StandardCharsets.UTF_8))
-                .nextValue();
-        records.addAll(HistoryJson.parse(j));
-        if (j instanceof JSONObject) vin = ((JSONObject) j).optString("vin");
-      }
+      workspaces = new WorkspaceStore(this);
+      workspaces.initialize();
+      workspaceKey = workspaces.active();
+      records.addAll(workspaces.load(workspaceKey));
+      vin = workspaceKey.equals("offline") ? "" : workspaceKey;
     } catch (Exception e) {
       saveBlocked = true;
       operationState = "Saved history could not be loaded · import a backup";
@@ -320,9 +317,26 @@ public final class MainActivity extends Activity {
         page(0, "Your service history", "Create a local record of the work completed.");
     card(p, "History workspace");
     summary = label("");
-    vinInput = input("VIN (optional for offline records)", vin, false);
+    vinInput = input("Workspace VIN · use Vehicle workspaces to switch", vin, false);
+    vinInput.setKeyListener(null);
     vinInput.setFilters(
         new android.text.InputFilter[] {new android.text.InputFilter.LengthFilter(17)});
+    button("Vehicle workspaces…", false, this::chooseWorkspace);
+    button(
+        "Check local history",
+        false,
+        () -> {
+          try {
+            List<String> issues = RecordChecks.issues(records);
+            showText(
+                "Local history checks",
+                issues.isEmpty()
+                    ? "No local conflicts found. This does not check the car's existing history."
+                    : String.join("\n", issues));
+          } catch (Exception e) {
+            message(e.getMessage());
+          }
+        });
     button(
         "Add service record",
         true,
@@ -384,6 +398,8 @@ public final class MainActivity extends Activity {
         records.size()
             + " service record"
             + (records.size() == 1 ? "" : "s")
+            + " · "
+            + workspaceKey
             + " · saved on this phone");
     historyList.removeAllViews();
     LinearLayout old = body;
@@ -468,12 +484,26 @@ public final class MainActivity extends Activity {
     planned = "";
     if (saveBlocked) {
       try {
-        File damaged = new File(getFilesDir(), "history.json");
+        File damaged = workspaces.file(workspaceKey);
+        if (!damaged.exists() && !new File(damaged + ".bak").exists())
+          damaged = new File(getFilesDir(), "history.json");
         if (damaged.exists())
           java.nio.file.Files.copy(
               damaged.toPath(),
               new File(getFilesDir(), "history-unreadable-" + System.currentTimeMillis() + ".json")
                   .toPath());
+        File oldBackup = new File(damaged + ".bak");
+        if (oldBackup.exists())
+          java.nio.file.Files.copy(
+              oldBackup.toPath(),
+              new File(getFilesDir(), "history-unreadable-backup-" + System.nanoTime() + ".json")
+                  .toPath());
+        if (!workspaces
+            .prefs
+            .edit()
+            .putString("active", workspaceKey)
+            .putBoolean("migrated", true)
+            .commit()) throw new IOException("Could not finish workspace recovery");
         saveBlocked = false;
       } catch (IOException e) {
         message("Cannot preserve the unreadable history. Saving is blocked: " + e.getMessage());
@@ -486,24 +516,120 @@ public final class MainActivity extends Activity {
   }
 
   void save() {
-    if (saveBlocked) return;
-    vin = vinInput == null ? vin : vinInput.getText().toString().trim().toUpperCase(Locale.ROOT);
+    saveWorkspace();
+  }
+
+  boolean saveWorkspace() {
+    if (saveBlocked) return false;
+    vin = workspaceKey.equals("offline") ? "" : workspaceKey;
     try {
-      String json = HistoryJson.dump(records, vin);
-      android.util.AtomicFile f =
-          new android.util.AtomicFile(new File(getFilesDir(), "history.json"));
-      FileOutputStream out = null;
-      try {
-        out = f.startWrite();
-        out.write(json.getBytes(StandardCharsets.UTF_8));
-        f.finishWrite(out);
-      } catch (Exception e) {
-        if (out != null) f.failWrite(out);
-        throw e;
-      }
+      workspaces.save(workspaceKey, records);
+      return true;
     } catch (Exception e) {
       message("Could not save history: " + e.getMessage());
+      return false;
     }
+  }
+
+  String openedTstKey() {
+    return "opened_tst_" + workspaceKey;
+  }
+
+  void chooseWorkspace() {
+    if (!available()) return;
+    List<String> keys = workspaces.keys();
+    String[] names = new String[keys.size() + 1];
+    for (int n = 0; n < keys.size(); n++)
+      names[n] = keys.get(n).equals("offline") ? "Offline workspace" : keys.get(n);
+    names[names.length - 1] = "Open another VIN…";
+    new AlertDialog.Builder(this)
+        .setTitle("Vehicle workspaces")
+        .setItems(
+            names,
+            (d, n) -> {
+              if (n < keys.size()) {
+                try {
+                  switchWorkspace(keys.get(n), false);
+                } catch (Exception e) {
+                  message(e.getMessage());
+                }
+                return;
+              }
+              LinearLayout view = new LinearLayout(this);
+              view.setOrientation(LinearLayout.VERTICAL);
+              EditText entry = new EditText(this);
+              entry.setHint("17-character VIN");
+              view.addView(entry);
+              CheckBox copy = new CheckBox(this);
+              copy.setText("Copy current records to this VIN");
+              view.addView(copy);
+              AlertDialog dialog =
+                  new AlertDialog.Builder(this)
+                      .setTitle("Open vehicle workspace")
+                      .setView(view)
+                      .setNegativeButton("Cancel", null)
+                      .setPositiveButton("Open", null)
+                      .create();
+              dialog.setOnShowListener(
+                  x ->
+                      dialog
+                          .getButton(-1)
+                          .setOnClickListener(
+                              v -> {
+                                try {
+                                  String key = WorkspaceStore.key(val(entry));
+                                  if (key.equals("offline"))
+                                    throw new IllegalArgumentException("Enter a VIN");
+                                  if (copy.isChecked())
+                                    confirm(
+                                        "Copy history to " + key + "?",
+                                        "This replaces that VIN workspace's local records. Other"
+                                            + " workspaces stay saved.",
+                                        () -> {
+                                          try {
+                                            switchWorkspace(key, true);
+                                            dialog.dismiss();
+                                          } catch (Exception e) {
+                                            message(e.getMessage());
+                                          }
+                                        });
+                                  else {
+                                    switchWorkspace(key, false);
+                                    dialog.dismiss();
+                                  }
+                                } catch (Exception e) {
+                                  entry.setError(e.getMessage());
+                                }
+                              }));
+              dialog.show();
+            })
+        .show();
+  }
+
+  void switchWorkspace(String key, boolean copy) throws Exception {
+    key = WorkspaceStore.key(key);
+    if (!saveWorkspace())
+      throw new IOException("Current workspace could not be saved; switch cancelled");
+    List<ServiceRecord> next =
+        copy
+            ? HistoryJson.parse(
+                new JSONObject(HistoryJson.dump(records, key.equals("offline") ? "" : key)))
+            : workspaces.load(key);
+    if (copy) workspaces.save(key, next);
+    workspaces.activate(key);
+    workspaceKey = key;
+    vin = key.equals("offline") ? "" : key;
+    records.clear();
+    records.addAll(next);
+    vinInput.setText(vin);
+    identified = "";
+    headUnitIdentity = "";
+    headUnitDetails = null;
+    cbsTarget = "";
+    planned = "";
+    erase.setChecked(false);
+    experimental.setChecked(false);
+    changed();
   }
 
   String val(EditText e) {
@@ -589,6 +715,7 @@ public final class MainActivity extends Activity {
                     try {
                       if (!available()) return;
                       ServiceRecord record = ServiceRecord.fromEditorArgs(val(args));
+                      if (index >= 0) record.localId = records.get(index).localId;
                       if (index < 0) records.add(record);
                       else records.set(index, record);
                       changed();
@@ -607,6 +734,7 @@ public final class MainActivity extends Activity {
       Target target = new Target();
       final String checked = identified.startsWith(target.key() + "|") ? identified : "";
       headUnitIdentity = "";
+      headUnitDetails = null;
       work(
           "Head-unit identification",
           () -> {
@@ -614,8 +742,10 @@ public final class MainActivity extends Activity {
               HeadUnitInfo.Result result = HeadUnitInfo.readDetailed(client, this::append);
               handler.post(
                   () -> {
-                    if (result.supported > 0 && identified.equals(checked))
+                    if (!checked.isEmpty() && result.supported > 0 && identified.equals(checked)) {
                       headUnitIdentity = checked;
+                      headUnitDetails = result;
+                    }
                     showText("Head-unit identification", target.ip + "\n\n" + result.report);
                   });
             }
@@ -629,11 +759,13 @@ public final class MainActivity extends Activity {
     if (!available()) return;
     try {
       Target target = mutationTarget();
+      requireExactHeadUnit(family.getSelectedItem().toString());
       if (eraseOnly && !backup.isChecked())
         throw new IOException(
             "Back up the current iDrive history and tick the backup confirmation.");
       final String expected = identified;
       final String profile = family.getSelectedItem().toString();
+      final HeadUnitInfo.Result exactHeadUnit = headUnitDetails;
       final byte[] request =
           eraseOnly ? new byte[] {0x31, 1, (byte) 0xa0, (byte) 0x80} : new byte[] {0x11, 1};
       String name = eraseOnly ? "Erase vehicle history only" : "Restart head unit only";
@@ -659,15 +791,14 @@ public final class MainActivity extends Activity {
                     work(
                         name,
                         () -> {
-                          verifyIdentity(target, expected);
-                          try (Hsfz client = client(target)) {
-                            if (eraseOnly) routine(client, request, "Erase history", profile);
-                            else {
-                              append("Restart TX " + ServiceRecord.hex(request));
-                              append(
-                                  "Restart RX " + ServiceRecord.hex(client.request(0x63, request)));
-                            }
-                          }
+                          executeHistory(
+                              target,
+                              expected,
+                              profile,
+                              exactHeadUnit,
+                              Collections.emptyList(),
+                              eraseOnly,
+                              !eraseOnly);
                           append(
                               "Request accepted. Verify the outcome in iDrive. No automatic retries"
                                   + " or rollback.");
@@ -908,7 +1039,12 @@ public final class MainActivity extends Activity {
             "Item status",
             new String[] {"Carried out", "Carried out late", "Overdue"},
             item.status - 1);
-    EditText dist = input("Remaining distance · unsigned km", Long.toString(item.distance), true);
+    EditText dist =
+        input(
+            "Remaining distance · signed km (negative = overdue)",
+            Long.toString(item.distance),
+            true);
+    dist.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_SIGNED);
     EditText months = input("Remaining time · months", Integer.toString(item.months), true);
     LinearLayout view = body;
     body = old;
@@ -932,7 +1068,9 @@ public final class MainActivity extends Activity {
                                 ? ServiceRecord.CODES[type.getSelectedItemPosition()]
                                 : Integer.parseInt(val(customCode));
                         ServiceRecord.range(code, 255, "Item code");
-                        ServiceRecord.range(km, 0xffffffffL, "Distance");
+                        if (km < Integer.MIN_VALUE || km > Integer.MAX_VALUE)
+                          throw new IllegalArgumentException(
+                              "Distance must fit a signed 32-bit value");
                         ServiceRecord.range(mo, 65535, "Months");
                         item.code = code;
                         item.status = st.getSelectedItemPosition() + 1;
@@ -961,7 +1099,7 @@ public final class MainActivity extends Activity {
 
   void saveOpenedTst() {
     if (!available()) return;
-    String address = prefs().getString("opened_tst", "");
+    String address = prefs().getString(openedTstKey(), "");
     if (address.isEmpty()) {
       message("Import a TST file first, or use Export Toolset32 .tst to save a new file.");
       return;
@@ -1068,18 +1206,38 @@ public final class MainActivity extends Activity {
           newVin = "";
           hasErase = i.erase;
         }
+        final String importKey = WorkspaceStore.key(newVin.isEmpty() ? vin : newVin);
         confirm(
             "Import " + imported.size() + " records?",
-            "This replaces the local workspace. The vehicle is unchanged."
+            "This replaces the local records in "
+                + importKey
+                + ". Other workspaces stay saved. The vehicle is unchanged."
                 + (hasErase
                     ? "\n"
                         + "The TST contains an erase instruction. It will stay OFF here; review"
                         + " it separately."
                     : ""),
             () -> {
+              if (saveBlocked) {
+                changed();
+                if (saveBlocked) return;
+              }
+              if (!importKey.equals(workspaceKey) && !saveWorkspace()) return;
+              try {
+                workspaces.save(importKey, imported);
+                workspaces.activate(importKey);
+              } catch (Exception e) {
+                message("Import not completed: " + e.getMessage());
+                return;
+              }
+              workspaceKey = importKey;
               records.clear();
               records.addAll(imported);
-              vinInput.setText(newVin);
+              vin = importKey.equals("offline") ? "" : importKey;
+              vinInput.setText(vin);
+              identified = "";
+              headUnitIdentity = "";
+              headUnitDetails = null;
               erase.setChecked(false);
               boolean tst = !(text.startsWith("{") || text.startsWith("["));
               if (tst) {
@@ -1097,7 +1255,10 @@ public final class MainActivity extends Activity {
                 } catch (SecurityException ignored) {
                 }
               }
-              prefs().edit().putString("opened_tst", tst ? data.getData().toString() : "").apply();
+              prefs()
+                  .edit()
+                  .putString(openedTstKey(), tst ? data.getData().toString() : "")
+                  .apply();
               changed();
             });
       }
@@ -1132,8 +1293,8 @@ public final class MainActivity extends Activity {
     TextView mguHelp =
         label(
             "For MGU changes: check vehicle identity, then read head-unit identification on the"
-                + " same connection. Model selection is manual. CBS resets on MGU-equipped vehicles"
-                + " remain disabled pending cluster validation.");
+                + " same connection. The family must match the F150 variant. CBS resets on"
+                + " MGU-equipped vehicles remain disabled pending cluster validation.");
     mguConsent.setVisibility(View.GONE);
     mguHelp.setVisibility(View.GONE);
     family.setOnItemSelectedListener(
@@ -1437,6 +1598,95 @@ public final class MainActivity extends Activity {
     writeRecords(records, erase.isChecked(), reset.isChecked());
   }
 
+  File journalRoot() {
+    return new File(getFilesDir(), "write-journals");
+  }
+
+  void requireExactHeadUnit(String profile) throws Exception {
+    if (!RecordChecks.vin(vin) || !vin.equals(workspaceKey))
+      throw new IOException("Open or copy your records into the connected VIN's workspace first");
+    if (identified.isEmpty()
+        || !identified.equals(headUnitIdentity)
+        || !identified.endsWith(" · " + vin))
+      throw new IOException("Read exact head-unit identification on this connection first");
+    HeadUnitInfo.requireMatch(headUnitDetails, profile);
+  }
+
+  void executeHistory(
+      Target target,
+      String expected,
+      String profile,
+      HeadUnitInfo.Result exact,
+      List<ServiceRecord> snapshot,
+      boolean erase,
+      boolean restart)
+      throws Exception {
+    synchronized (WriteJournal.class) {
+      executeHistoryLocked(target, expected, profile, exact, snapshot, erase, restart);
+    }
+  }
+
+  void executeHistoryLocked(
+      Target target,
+      String expected,
+      String profile,
+      HeadUnitInfo.Result exact,
+      List<ServiceRecord> snapshot,
+      boolean erase,
+      boolean restart)
+      throws Exception {
+    String checkedVin = expected.substring(expected.lastIndexOf(" · ") + 3);
+    HeadUnitInfo.requireMatch(exact, profile);
+    WriteJournal journal =
+        WriteJournal.begin(
+            journalRoot(),
+            checkedVin,
+            profile,
+            exact.variant,
+            ServiceRecord.hex(exact.software),
+            snapshot,
+            erase,
+            restart);
+    journal.data.put("connection", target.key()).put("checked_gateway", expected);
+    journal.persist();
+    append("Persistent operation journal: " + journal.file.getName());
+    boolean complete = false;
+    try {
+      verifyIdentity(target, expected);
+      try (Hsfz h = client(target)) {
+        HeadUnitInfo.recheck(h, exact);
+        JSONArray steps = journal.data.getJSONArray("steps");
+        for (int n = 0; n < steps.length(); n++) {
+          JSONObject step = steps.getJSONObject(n);
+          append(step.getString("kind") + " TX " + step.getString("request"));
+          byte[] response = journal.send(n, request -> h.request(0x63, request), profile);
+          append(step.getString("kind") + " RX " + ServiceRecord.hex(response));
+          if (step.getString("kind").equals("erase")) Thread.sleep(200);
+          if (step.getString("kind").equals("add")) Thread.sleep(100);
+        }
+      }
+      complete = true;
+    } finally {
+      journal.finish(
+          complete,
+          complete
+              ? "Responses confirmed; inspect iDrive. No vehicle read-back."
+              : "Stopped. A pending send may have taken effect. Inspect iDrive; do not replay"
+                    + " automatically.");
+    }
+  }
+
+  void viewJournals(boolean export) {
+    if (!available()) return;
+    try {
+      String report = WriteJournal.report(journalRoot(), vin);
+      if (export) exportText(report, "BMW-service-write-journals.txt", "text/plain");
+      else showText("Persistent write journals", report);
+    } catch (Exception e) {
+      message("Journal unavailable: " + e.getMessage());
+    }
+  }
+
   void writeRecords(List<ServiceRecord> selectedRecords, boolean er, boolean re) {
     if (!available()) return;
     try {
@@ -1446,6 +1696,11 @@ public final class MainActivity extends Activity {
             "Back up the current iDrive history and tick the backup confirmation.");
       Target t = mutationTarget();
       final String profile = family.getSelectedItem().toString();
+      requireExactHeadUnit(profile);
+      final HeadUnitInfo.Result exactHeadUnit = headUnitDetails;
+      RecordChecks.requireWritable(selectedRecords);
+      RecordChecks.requireUnambiguousDates(selectedRecords, records);
+      if (!er) WriteJournal.guard(journalRoot(), vin, selectedRecords);
       HeadUnitProtocol.validateForProfile(selectedRecords, profile);
       String exact = plan(selectedRecords, er, re);
       if (!exact.equals(planned))
@@ -1475,31 +1730,7 @@ public final class MainActivity extends Activity {
                     work(
                         "Service-history write",
                         () -> {
-                          verifyIdentity(t, id);
-                          try (Hsfz h = client(t)) {
-                            if (er) {
-                              routine(
-                                  h,
-                                  new byte[] {0x31, 1, (byte) 0xa0, (byte) 0x80},
-                                  "Erase history",
-                                  profile);
-                              Thread.sleep(200);
-                            }
-                            for (ServiceRecord r : snapshot) {
-                              routine(
-                                  h,
-                                  ServiceRecord.add(r),
-                                  "Add " + r.date + " / " + r.mileage + " km",
-                                  profile);
-                              Thread.sleep(100);
-                            }
-                            if (re) {
-                              append("Requesting head-unit restart");
-                              append(
-                                  "Restart response: "
-                                      + ServiceRecord.hex(h.request(0x63, new byte[] {0x11, 1})));
-                            }
-                          }
+                          executeHistory(t, id, profile, exactHeadUnit, snapshot, er, re);
                           append(
                               "All steps accepted by the ECU. Verify each record in iDrive; this is"
                                   + " not a read-back verification.");
@@ -1639,6 +1870,8 @@ public final class MainActivity extends Activity {
         "Export session log",
         false,
         () -> exportText(session, "bmw-service-session.txt", "text/plain"));
+    button("View persistent write journals", false, () -> viewJournals(false));
+    button("Export write journals", false, () -> viewJournals(true));
     button(
         "Clear completed session log",
         false,

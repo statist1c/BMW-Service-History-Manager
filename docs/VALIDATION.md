@@ -1,5 +1,13 @@
 # Validation record — updated 16 November 2026
 
+## v0.5.0 and real-car read-only validation
+
+On 16 November 2026, user-provided v0.4.2-beta diagnostics and screen recording confirmed ENET discovery/vehicle identity, complete nine-DID head-unit identification (MGU variant 0F25B0; F101 software fingerprint, serial and VIN returned), and two complete 127-slot CBS scans with seven populated service items. No busy responses or retries occurred in those two runs; automatic busy recovery is covered by simulated tests, not that car recording. APK fingerprints matched the delivered build. Raw logs and recording are kept private and are not bundled in source.
+
+v0.5.0 carries the same read-only protocol implementation with release version/diagnostic heading changes. On the signed v0.5.0 emulator installation, 402 core/protocol checks, 26 diagnostic/export checks, 36 Android storage/failure checks and 49 Android UI checks passed. Debug/release lint passed. Same-key installation upgraded the beta without uninstalling.
+
+Tested and working scope: 2019 BMW 530e G30, iDrive 7, vehicle/head-unit identification and current CBS requirements. Completed iDrive history reading is unsupported. History writing, erase/restart and CBS resets remain unvalidated on this vehicle; MGU CBS resets remain disabled. Earlier statements below are historical validation records.
+
 ## v0.4.0
 
 Passed: **40 core + 50 feature + 35 v0.4.0 core checks**, **36 Android storage/failure checks**, and **51 full Android/UI checks** (including the live GitHub and dark-theme screenshot options). The signed-release migration check additionally passed four assertions after a one-check v0.3.0 fixture seed. Debug/release assembly, test APK assembly, `lintDebug` and `lintRelease` passed. Release lint has zero errors; remaining warnings concern localization, legacy UI APIs and drawing allocations.

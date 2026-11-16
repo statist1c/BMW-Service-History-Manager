@@ -225,6 +225,78 @@ public class AppSmokeTest extends Instrumentation {
                   new Intent(getTargetContext(), MainActivity.class)
                       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
       waitForIdleSync();
+      if (args != null && "diagnostics".equals(args.getString("focus"))) {
+        String header = DiagnosticsBuild.header(getTargetContext());
+        ok(header.contains("0.5.0 (5000)"), "Installed release identity");
+        java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+        digest.update(
+            java.nio.file.Files.readAllBytes(
+                new java.io.File(getTargetContext().getApplicationInfo().sourceDir).toPath()));
+        StringBuilder hash = new StringBuilder();
+        for (byte b : digest.digest())
+          hash.append(String.format(java.util.Locale.ROOT, "%02x", b & 255));
+        ok(header.contains(hash.toString()), "Installed APK hash matches independent digest");
+        app.saveHeadUnitReport("partial diagnostic fixture\n");
+        ok(
+            new String(
+                    java.nio.file.Files.readAllBytes(
+                        new java.io.File(
+                                getTargetContext().getFilesDir(), "last-head-unit-report.txt")
+                            .toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8)
+                .equals("partial diagnostic fixture\n"),
+            "Diagnostic report persists");
+        CbsScan.Result partial =
+            CbsScan.read(
+                (target, request) -> {
+                  int slot = request[2] & 255;
+                  if (slot != 1) throw new java.io.EOFException("fixture disconnect");
+                  return new byte[] {
+                    0x62, 0x41, 1, 0, 1, 100, 10, 0, 24, 0, 24, 9, 96, 0, 28, 0, 11
+                  };
+                },
+                delay -> {},
+                line -> {});
+        ui(
+            () -> {
+              app.cbsItems.clear();
+              app.cbsItems.addAll(partial.items);
+              app.cbsTarget = partial.complete ? "fixture identity" : "";
+              app.cbsScanState = partial.summary();
+              app.renderCbs();
+              app.select(1);
+            });
+        ok(
+            app.cbsItems.size() == 1 && app.cbsTarget.isEmpty(),
+            "Partial results visible without reset authorization");
+        ok(
+            app.cbsScanState.contains("INCOMPLETE")
+                && app.cbsScanState.contains("fixture disconnect"),
+            "Partial scan status retained in UI");
+        ui(() -> app.select(2));
+        node("Export car diagnostic log");
+        ok(true, "Monitor export button visible");
+        ui(() -> app.exportCarDiagnostics());
+        for (int n = 0; n < 50 && app.busy; n++) Thread.sleep(100);
+        waitForIdleSync();
+        String exported =
+            new String(
+                java.nio.file.Files.readAllBytes(
+                    new java.io.File(getTargetContext().getCacheDir(), "pending-export.txt")
+                        .toPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+        ok(
+            exported.contains("partial diagnostic fixture")
+                && exported.contains("CURRENT SESSION:")
+                && exported.contains(hash.toString()),
+            "Export includes persisted scan, session and APK identity");
+        getUiAutomation()
+            .performGlobalAction(
+                android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);
+        result.putString("stream", "PASS: " + checks + " diagnostic checks\n");
+        finish(Activity.RESULT_OK, result);
+        return;
+      }
       ui(
           () -> {
             app.records.clear();

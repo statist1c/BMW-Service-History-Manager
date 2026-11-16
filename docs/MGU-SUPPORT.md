@@ -1,5 +1,7 @@
 # MGU support in v0.2.0
 
+**v0.5.0 update (16 November 2026):** Identification and read-only CBS were tested and working on a 2019 BMW 530e G30 with iDrive 7 using v0.4.2-beta. F150 returned 0F25B0; two CBS scans completed with seven items. v0.5.0 retains that implementation. This does not validate history writes, erase/restart or CBS resets. See [VALIDATION.md](VALIDATION.md). Details below include the earlier research record.
+
 **Implemented experimental service-history support, not real-vehicle validation.** Unknown-family changes remain disabled. This is local head-unit history editing, not BMW backend service-book registration.
 
 ## Evidence inspected

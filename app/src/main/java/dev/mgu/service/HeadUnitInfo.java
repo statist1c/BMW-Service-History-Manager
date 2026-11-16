@@ -6,13 +6,21 @@ import java.util.Locale;
 
 /** Read-only standardized identification DIDs; never infers head-unit compatibility. */
 public final class HeadUnitInfo {
+  public static final String READER_REVISION = "BMW-HU-ID/2";
+
   public static final class Result {
     public final String report;
     public final int supported;
     public final String variant;
     public final byte[] software;
+    public final boolean complete;
 
     Result(String text, int count, String variant, byte[] software) {
+      this(text, count, variant, software, true);
+    }
+
+    Result(String text, int count, String variant, byte[] software, boolean complete) {
+      this.complete = complete;
       report = text;
       supported = count;
       this.variant = variant;
@@ -68,7 +76,10 @@ public final class HeadUnitInfo {
   }
 
   public static void requireMatch(Result result, String profile) throws java.io.IOException {
-    if (result == null || result.variant.isEmpty() || result.software.length == 0)
+    if (result == null
+        || !result.complete
+        || result.variant.isEmpty()
+        || result.software.length == 0)
       throw new java.io.IOException("Read exact head-unit identification (F150 and F101) first");
     if (!family(result.variant).equals(profile) || profile.startsWith("Unknown"))
       throw new java.io.IOException(
@@ -102,14 +113,24 @@ public final class HeadUnitInfo {
   }
 
   public static Result readDetailed(Hsfz client, Output output) throws Exception {
-    StringBuilder result = new StringBuilder("Head-unit diagnostic address 0x63\n\n");
+    StringBuilder result =
+        new StringBuilder(
+            "Reader: "
+                + READER_REVISION
+                + "\n"
+                + "Planned DIDs: F150 F101 F197 F187 F188 F189 F18C F190 F191\n"
+                + "Head-unit diagnostic address 0x63\n\n");
     int supported = 0;
+    int attempted = 0;
+    boolean complete = true;
     String variant = "";
     byte[] software = new byte[0];
     for (int n = 0; n < DIDS.length; n++) {
       int did = DIDS[n];
       byte[] request = {0x22, (byte) (did >> 8), (byte) did};
       String title = String.format(Locale.ROOT, "%s · 0x%04X", NAMES[n], did);
+      attempted++;
+      result.append("TX 63: ").append(ServiceRecord.hex(request)).append("\n");
       output.accept(title + " TX " + ServiceRecord.hex(request));
       try {
         byte[] response = client.request(0x63, request);
@@ -121,6 +142,8 @@ public final class HeadUnitInfo {
             .append(title)
             .append("\n")
             .append(did == 0xf150 ? variant + " · " + family(variant) : display(value))
+            .append("\nRX: ")
+            .append(ServiceRecord.hex(response))
             .append("\nRaw: ")
             .append(ServiceRecord.hex(value))
             .append("\n\n");
@@ -128,10 +151,30 @@ public final class HeadUnitInfo {
       } catch (Hsfz.Negative e) {
         result.append(title).append("\nNot available: ").append(e.getMessage()).append("\n\n");
         output.accept(title + " · " + e.getMessage());
+        result.append(String.format(Locale.ROOT, "RX: 7F 22 %02X\n\n", e.nrc));
+      } catch (java.io.IOException e) {
+        complete = false;
+        String error =
+            "Scan stopped at "
+                + title
+                + ": "
+                + e.getClass().getSimpleName()
+                + ": "
+                + e.getMessage();
+        result.append(error).append("\nPartial results retained; no further requests sent.\n\n");
+        output.accept(error);
+        break;
       }
     }
     return new Result(
         result
+            + "Scan: "
+            + (complete ? "complete" : "INCOMPLETE")
+            + " · attempted "
+            + attempted
+            + " / "
+            + DIDS.length
+            + "\n"
             + "Returned identifiers: "
             + supported
             + " / "
@@ -142,6 +185,7 @@ public final class HeadUnitInfo {
             + " software fingerprint.",
         supported,
         variant,
-        software);
+        software,
+        complete);
   }
 }

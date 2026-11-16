@@ -138,7 +138,7 @@ final class Updater {
   static Release choose(JSONArray releases, String installed, String repo, boolean previews)
       throws Exception {
     Release best = null;
-    ReleaseVersion current = ReleaseVersion.parse(installed);
+    ReleaseVersion current = ReleaseVersion.parse(installed.replaceFirst("-beta$", ""));
     for (int i = 0; i < releases.length(); i++) {
       JSONObject r = releases.getJSONObject(i);
       if (r.optBoolean("draft") || (!previews && r.optBoolean("prerelease"))) continue;
@@ -239,7 +239,9 @@ final class Updater {
       if (json.isEmpty()) return null;
       Release r = new Release(new JSONObject(json));
       if (r.preview && !prefs(c).getBoolean("previews", true)) return null;
-      return ReleaseVersion.parse(r.tag).compareTo(ReleaseVersion.parse(BuildConfig.VERSION_NAME))
+      return ReleaseVersion.parse(r.tag)
+                  .compareTo(
+                      ReleaseVersion.parse(BuildConfig.VERSION_NAME.replaceFirst("-beta$", "")))
               > 0
           ? r
           : null;

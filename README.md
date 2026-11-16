@@ -2,11 +2,11 @@
 
 Native Android app for creating, editing and organising BMW service history, with JSON and Toolset32 TST import/export, modern themes, and experimental ENET vehicle connectivity.
 
-**Version:** 0.4.0 · Android 8.0+ · universal APK, no bundled native libraries. Independent project; no BMW affiliation. Vehicle operations, including MGU history support, are experimental and have **not** been validated on a BMW from Android.
+**Version:** 0.5.0 · Android 8.0+ · universal APK, no bundled native libraries. Independent project; no BMW affiliation. **Tested and working on a 2019 BMW 530e G30 with iDrive 7:** ENET discovery, vehicle identity, MGU head-unit identification and reading current CBS service requirements. Two v0.4.2-beta CBS scans completed with seven service items. v0.5.0 carries forward that tested read-only implementation. Service-history writing, erase/restart and CBS resets remain experimental and have not been validated on this car; reading completed iDrive service history is not supported.
 
 ## Install
 
-Install the signed `BMW-Service-Manager-v0.4.0.apk` supplied with this project. Android may ask you to allow installation from the app used to open the file. No root is required on the phone.
+Install the signed `BMW-Service-Manager-v0.5.0.apk` supplied with this project. Android may ask you to allow installation from the app used to open the file. No root is required on the phone.
 
 ## Features
 
@@ -18,8 +18,8 @@ Install the signed `BMW-Service-Manager-v0.4.0.apk` supplied with this project. 
 | Upstream/Stampbook JSON and Toolset32 TST import/export | Implemented; import replaces the local workspace only after confirmation |
 | Local autosave and Android file picker exports | Implemented; private storage, backup/transfer disabled |
 | Exact UDS request preview | Implemented offline |
-| ENET discovery and gateway identity/VIN | Experimental native UDP transport |
-| CBS read from cluster slots 0x4101–0x417F | Experimental native HSFZ transport |
+| ENET discovery and gateway identity/VIN | Tested and working on the G30 test car |
+| CBS read from cluster slots 0x4101–0x417F | Tested and working on the G30 test car; bounded busy recovery and partial results |
 | Service-history write / optional erase and restart | Experimental; explicit supported-family selection, identity check, backup acknowledgement, preview and two confirmations required |
 | CBS reset | Experimental; completed-service confirmation, identity and supported-family selection required |
 | Write selected record | Adds one previewed record, never erases existing history; duplicate entries remain possible |
@@ -28,7 +28,7 @@ Install the signed `BMW-Service-Manager-v0.4.0.apk` supplied with this project. 
 | EDIABAS argument editor | Add/edit/copy validated arguments locally; does not execute arbitrary jobs |
 | Head-unit identification | Reads nine identity DIDs, including BMW F150 variant and F101 software fingerprint; rechecks both before history mutations |
 | MGU service-history add / erase / restart | Experimental profile based on inspected diagnostic definitions; explicit MGU acknowledgement and a scoped head-unit identification read required |
-| CBS reset on MGU-equipped vehicles | Disabled pending separate cluster validation; read-only CBS remains experimental |
+| CBS reset on MGU-equipped vehicles | Disabled pending separate cluster validation; read-only CBS tested on the G30 test car |
 | Read back existing head-unit service history | Not supported by the known upstream protocol |
 | Cloud/digital BMW service-book updates | Not supported |
 | QR/Stampbook transfer, 3D drive replay, DID probe tools | Not ported; use upstream desktop app |
@@ -50,7 +50,7 @@ Use an ENET cable and a compatible USB-C Ethernet adapter, or an ENET Wi-Fi adap
 
 Enter the actual gateway IPv4 address and HSFZ port (normally 6801), or use discovery. The suggested `169.254.199.99` is only a starting value, not an assumed vehicle address. The MGU SSH IP from other companion apps is not necessarily the diagnostic gateway. Check the vehicle identity and VIN. Discovery selects the first response; verify it before proceeding.
 
-For mutations: select the actual head-unit family, enable experimental changes for that session, and match the workspace VIN if one is set. For MGU, acknowledge experimental support, check vehicle identity, then read head-unit identification on that same connection; at least one identifier must be returned. This is a responsiveness check, not automatic proof of the model or write permissions. History writes additionally require the backup acknowledgement and an exact preview of the current records/options. The app rechecks the gateway identity immediately before sending changes. Standalone restart and erase send no add-record requests; standalone erase requires the backup acknowledgement. MGU CBS resets stay disabled.
+For mutations: select the actual head-unit family, enable experimental changes for that session, and match the workspace VIN if one is set. For MGU, acknowledge experimental support, check vehicle identity, then read head-unit identification on that same connection; F150 must identify the selected family and F101 must return a software fingerprint in a complete scan. This does not prove write permissions. History writes additionally require the backup acknowledgement and an exact preview of the current records/options. The app rechecks the gateway identity immediately before sending changes. Standalone restart and erase send no add-record requests; standalone erase requires the backup acknowledgement. MGU CBS resets stay disabled.
 
 Only work while parked, ignition on, with stable vehicle battery power. Head-unit history cannot be read back or backed up by this app: photograph it in iDrive first. Erase is permanent. Writes stop on the first transport/ECU/routine failure and are never automatically retried or rolled back. A failure can leave partial changes. The app checks response service/echo and routine result, but only inspection in iDrive/cluster confirms the actual vehicle outcome.
 
@@ -80,10 +80,12 @@ On Windows, use `gradlew.bat` instead of `bash gradlew`. Debug APK: `app/build/o
 For standalone core checks, use JDK 17:
 
 ```text
-javac -d work/test-classes app/src/main/java/dev/mgu/service/ServiceRecord.java app/src/main/java/dev/mgu/service/Hsfz.java app/src/main/java/dev/mgu/service/Cbs.java app/src/main/java/dev/mgu/service/HeadUnitInfo.java app/src/main/java/dev/mgu/service/HeadUnitProtocol.java app/src/main/java/dev/mgu/service/RecordChecks.java tests/CoreTest.java tests/FeatureTest.java tests/V040CoreTest.java
+javac -d work/test-classes app/src/main/java/dev/mgu/service/ServiceRecord.java app/src/main/java/dev/mgu/service/Hsfz.java app/src/main/java/dev/mgu/service/Cbs.java app/src/main/java/dev/mgu/service/CbsScan.java app/src/main/java/dev/mgu/service/HeadUnitInfo.java app/src/main/java/dev/mgu/service/HeadUnitProtocol.java app/src/main/java/dev/mgu/service/RecordChecks.java tests/CoreTest.java tests/FeatureTest.java tests/V040CoreTest.java tests/V041CoreTest.java tests/V042CoreTest.java
 java -cp work/test-classes dev.mgu.service.CoreTest
 java -cp work/test-classes dev.mgu.service.FeatureTest
 java -cp work/test-classes dev.mgu.service.V040CoreTest
+java -cp work/test-classes dev.mgu.service.V041CoreTest
+java -cp work/test-classes dev.mgu.service.V042CoreTest
 ```
 
 The platform-only instrumentation runner is `dev.mgu.service.AppSmokeTest`; run on a dedicated test emulator. It creates and clears this app's local test records. The optional updater-validation test fixtures are documented in `docs/VALIDATION.md`.
@@ -109,3 +111,7 @@ Use **Vehicle workspaces** to open a VIN or return to offline editing. Each VIN 
 Monitor provides **View persistent write journals** and **Export write journals**. Journals contain the local snapshot, VIN, head-unit variant/software fingerprint, frozen requests and step outcomes. Intent is synced to storage before sending. A pending send after interruption is uncertain. Accepted/uncertain appends are blocked by VIN plus draft ID, date or payload fingerprint; editing or reloading a draft does not authorize a retry. Explicit replacement remains destructive and requires separate confirmations. There is no automatic replay or rollback. Keep exported journals private: they contain vehicle identifiers. Journals are local evidence, not a backup or read-back of the vehicle history. Reports are size limited; stored journal files are retained.
 
 The new storage, journaling and local checks are independently implemented. No application code, databases, native interpreter, proprietary PRG files or assets from lennoncarvalho/bmw-self-service are included. See [v0.4.0 protocol notes](docs/V040-NOTES.md) for evidence and limitations.
+
+## v0.5.0 diagnostic logs
+
+Vehicle and Monitor provide **Export car diagnostic log**. Exports include the installed version/APK fingerprint, the latest saved head-unit report and current-session raw CBS traffic. Logs contain VIN and ECU identifiers. Keep the app open through the scan and export. CBS reads are paced; explicit busy responses receive up to two delayed retries of the same read. Interrupted scans retain partial results with an incomplete status and cannot authorize CBS resets. This retry policy applies only to CBS reads, never vehicle mutations.

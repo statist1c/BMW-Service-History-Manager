@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Version for the APK (v0.4.0)
+        description: Version for the APK (v0.5.0)
         required: true
         type: string
 permissions:
@@ -34,10 +34,12 @@ jobs:
       - name: Core protocol checks
         run: |
           mkdir -p work/test-classes
-          javac -d work/test-classes app/src/main/java/dev/mgu/service/ServiceRecord.java app/src/main/java/dev/mgu/service/Hsfz.java app/src/main/java/dev/mgu/service/Cbs.java app/src/main/java/dev/mgu/service/HeadUnitInfo.java app/src/main/java/dev/mgu/service/HeadUnitProtocol.java app/src/main/java/dev/mgu/service/RecordChecks.java tests/CoreTest.java tests/FeatureTest.java tests/V040CoreTest.java
+          javac -d work/test-classes app/src/main/java/dev/mgu/service/ServiceRecord.java app/src/main/java/dev/mgu/service/Hsfz.java app/src/main/java/dev/mgu/service/Cbs.java app/src/main/java/dev/mgu/service/CbsScan.java app/src/main/java/dev/mgu/service/HeadUnitInfo.java app/src/main/java/dev/mgu/service/HeadUnitProtocol.java app/src/main/java/dev/mgu/service/RecordChecks.java tests/CoreTest.java tests/FeatureTest.java tests/V040CoreTest.java tests/V041CoreTest.java tests/V042CoreTest.java
           java -cp work/test-classes dev.mgu.service.CoreTest
           java -cp work/test-classes dev.mgu.service.FeatureTest
           java -cp work/test-classes dev.mgu.service.V040CoreTest
+          java -cp work/test-classes dev.mgu.service.V041CoreTest
+          java -cp work/test-classes dev.mgu.service.V042CoreTest
       - name: Restore private signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

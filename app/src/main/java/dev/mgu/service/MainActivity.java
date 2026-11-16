@@ -47,6 +47,8 @@ public final class MainActivity extends Activity {
   WorkspaceStore workspaces;
   String workspaceKey = "offline";
   HeadUnitInfo.Result headUnitDetails;
+  String lastHeadUnitReport = "";
+  String cbsScanState = "";
 
   SharedPreferences prefs() {
     return getSharedPreferences("settings", 0);
@@ -116,7 +118,7 @@ public final class MainActivity extends Activity {
     ImageView logo = new ImageView(this);
     logo.setImageResource(R.drawable.ic_service);
     header.addView(logo, new LinearLayout.LayoutParams(dp(46), dp(46)));
-    TextView title = text("BMW Service\nHistory Manager", 20, INK);
+    TextView title = text("BMW Service\nHistory Manager · " + BuildConfig.VERSION_NAME, 20, INK);
     title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
     LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, -2, 1);
     tl.leftMargin = dp(10);
@@ -740,19 +742,94 @@ public final class MainActivity extends Activity {
           () -> {
             try (Hsfz client = client(target)) {
               HeadUnitInfo.Result result = HeadUnitInfo.readDetailed(client, this::append);
+              final String report =
+                  DiagnosticsBuild.header(this)
+                      + "Run: "
+                      + java.time.Instant.now()
+                      + "\nTarget: "
+                      + target.ip
+                      + "\nChecked identity: "
+                      + checked
+                      + "\n\n"
+                      + result.report;
+              saveHeadUnitReport(report);
               handler.post(
                   () -> {
-                    if (!checked.isEmpty() && result.supported > 0 && identified.equals(checked)) {
+                    if (result.complete
+                        && !checked.isEmpty()
+                        && result.supported > 0
+                        && identified.equals(checked)) {
                       headUnitIdentity = checked;
                       headUnitDetails = result;
                     }
-                    showText("Head-unit identification", target.ip + "\n\n" + result.report);
+                    lastHeadUnitReport = report;
+                    showText("Head-unit identification", report);
                   });
+            } catch (Exception e) {
+              String failed =
+                  DiagnosticsBuild.header(this)
+                      + "Run: "
+                      + java.time.Instant.now()
+                      + "\nTarget: "
+                      + target.ip
+                      + "\nIdentification failed: "
+                      + e
+                      + "\n";
+              try {
+                saveHeadUnitReport(failed);
+              } catch (IOException saveError) {
+                e.addSuppressed(saveError);
+              }
+              lastHeadUnitReport = failed;
+              throw e;
             }
           });
     } catch (Exception e) {
       message(e.getMessage());
     }
+  }
+
+  void saveHeadUnitReport(String report) throws IOException {
+    android.util.AtomicFile file =
+        new android.util.AtomicFile(new File(getFilesDir(), "last-head-unit-report.txt"));
+    FileOutputStream out = file.startWrite();
+    try {
+      out.write(report.getBytes(StandardCharsets.UTF_8));
+      file.finishWrite(out);
+    } catch (IOException e) {
+      file.failWrite(out);
+      throw e;
+    }
+  }
+
+  void exportCarDiagnostics() {
+    if (!available()) return;
+    work(
+        "Prepare diagnostic log",
+        () -> {
+          String report = lastHeadUnitReport;
+          File saved = new File(getFilesDir(), "last-head-unit-report.txt");
+          if (report.isEmpty() && saved.exists())
+            report =
+                new String(
+                    java.nio.file.Files.readAllBytes(saved.toPath()), StandardCharsets.UTF_8);
+          final String exported =
+              DiagnosticsBuild.header(this)
+                  + "Exported: "
+                  + java.time.Instant.now()
+                  + "\n"
+                  + "Contains vehicle VIN and ECU identifiers.\n\n"
+                  + "LAST IDENTIFICATION SCAN (see its own build and time):\n"
+                  + (report.isEmpty() ? "No identification scan saved.\n" : report)
+                  + "\nCURRENT SESSION:\n"
+                  + session;
+          handler.post(
+              () ->
+                  exportText(
+                      exported,
+                      "BMW-car-diagnostics-" + BuildConfig.VERSION_NAME + ".txt",
+                      "text/plain"));
+        });
   }
 
   void independentControl(boolean eraseOnly) {
@@ -1326,6 +1403,7 @@ public final class MainActivity extends Activity {
     button("Check vehicle identity", true, () -> identify());
     identity = label("No vehicle identity checked this session.");
     button("Read head-unit identification", false, () -> identifyHeadUnit());
+    button("Export car diagnostic log", false, () -> exportCarDiagnostics());
     card(p, "2   Preview the write");
     erase = check("Erase existing vehicle history first", false);
     reset = check("Restart head unit after successful write", true);
@@ -1672,7 +1750,7 @@ public final class MainActivity extends Activity {
           complete
               ? "Responses confirmed; inspect iDrive. No vehicle read-back."
               : "Stopped. A pending send may have taken effect. Inspect iDrive; do not replay"
-                    + " automatically.");
+                  + " automatically.");
     }
   }
 
@@ -1756,29 +1834,20 @@ public final class MainActivity extends Activity {
       work(
           "CBS read",
           () -> {
-            List<Cbs> result = new ArrayList<>();
+            final CbsScan.Result result;
+            append("CBS read-only scan target: " + t.ip);
             try (Hsfz h = client(t)) {
-              for (int slot = 1; slot <= 127; slot++) {
-                try {
-                  byte[] raw = h.request(0x60, new byte[] {0x22, 0x41, (byte) slot});
-                  Cbs c = Cbs.decode(Arrays.copyOfRange(raw, 3, raw.length));
-                  if (c != null && c.code == slot) {
-                    result.add(c);
-                    append(c.name() + " RX " + ServiceRecord.hex(c.raw));
-                  }
-                } catch (Hsfz.Negative e) {
-                  if (e.nrc != 0x31 && e.nrc != 0x11 && e.nrc != 0x12) throw e;
-                }
-              }
+              result = CbsScan.read(h::request, Thread::sleep, this::append);
             }
             handler.post(
                 () -> {
                   cbsItems.clear();
-                  cbsItems.addAll(result);
-                  cbsTarget = checked;
+                  cbsItems.addAll(result.items);
+                  cbsTarget = result.complete ? checked : "";
+                  cbsScanState = result.summary();
                   renderCbs();
+                  if (!result.complete) message(result.summary());
                 });
-            append("CBS read: " + result.size() + " populated slots.");
           });
     } catch (Exception e) {
       message(e.getMessage());
@@ -1790,9 +1859,11 @@ public final class MainActivity extends Activity {
     LinearLayout old = body;
     body = cbsList;
     label(
-        cbsItems.isEmpty()
-            ? "No supported CBS items returned."
-            : "Live snapshot · refresh after any service reset.");
+        !cbsScanState.isEmpty()
+            ? cbsScanState
+            : cbsItems.isEmpty()
+                ? "No supported CBS items returned."
+                : "Live snapshot · refresh after any service reset.");
     for (Cbs c : cbsItems) {
       label(
           c.name()
@@ -1870,6 +1941,7 @@ public final class MainActivity extends Activity {
         "Export session log",
         false,
         () -> exportText(session, "bmw-service-session.txt", "text/plain"));
+    button("Export car diagnostic log", false, () -> exportCarDiagnostics());
     button("View persistent write journals", false, () -> viewJournals(false));
     button("Export write journals", false, () -> viewJournals(true));
     button(
